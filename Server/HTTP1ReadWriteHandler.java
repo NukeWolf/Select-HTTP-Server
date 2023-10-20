@@ -1,6 +1,7 @@
 package Server;
 import java.nio.*;
 import java.nio.channels.*;
+import java.util.HashMap;
 import java.io.IOException;
 
 public class HTTP1ReadWriteHandler implements IReadWriteHandler {
@@ -13,12 +14,18 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 	private boolean responseSent;
 	private boolean channelClosed;
 
-	private StringBuffer request;
+	private StringBuffer line_buffer;
 
-	// private enum State {
-	// READ_REQUEST, REQUEST_COMPLETE, GENERATING_RESPONSE, RESPONSE_READY,
-	// RESPONSE_SENT
-	// }
+	private String method;
+	private String target;
+	private String protocol;
+
+	private HashMap<String,String> headers;
+	private String body;
+
+	private enum ReadStates { REQUEST_METHOD, REQUEST_TARGET, REQUEST_PROTOCOL, REQUEST_HEADERS, REQUEST_BODY, REQUEST_COMPLETE}
+	private ReadStates currentReadState;
+
 	// private State state;
 
 	public HTTP1ReadWriteHandler() {
@@ -31,7 +38,9 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		responseSent = false;
 		channelClosed = false;
 
-		request = new StringBuffer(4096);
+		line_buffer = new StringBuffer(4096);
+		headers = new HashMap<String,String>();
+		currentReadState = ReadStates.REQUEST_METHOD;
 	}
 
 	public int getInitOps() {
@@ -57,8 +66,6 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 
 	private void updateSelectorState(SelectionKey key) throws IOException {
 
-		Debug.DEBUG("->Update dispatcher.");
-
 		if (channelClosed)
 			return;
 
@@ -78,7 +85,6 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		}
 
 		if (responseReady) {
-
 			if (!responseSent) {
 				nextState = nextState | SelectionKey.OP_WRITE;
 				Debug.DEBUG("New state: +Write since response ready but not done sent");
@@ -114,44 +120,70 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 	} // end of handleWrite
 
 	private void processInBuffer(SelectionKey key) throws IOException {
-		Debug.DEBUG("processInBuffer");
+
+		// Read from Socket
 		SocketChannel client = (SocketChannel) key.channel();
 		int readBytes = client.read(inBuffer);
 
-
 		Debug.DEBUG("handleRead: Read data from connection " + client + " for " + readBytes + " byte(s); to buffer "
-				+ inBuffer);
+		+ inBuffer);
 
-		if (readBytes == -1) { // end of stream
-			requestComplete = true;
+		// If no bytes to read. TODO: Not sure if right as a request ends in a CRLF.
+		if (readBytes == -1) { 
+			// requestComplete = true;
+			return;
+		} 
 
-			Debug.DEBUG("handleRead: readBytes == -1");
-		} else {
-			inBuffer.flip(); // read input
-			// outBuffer = ByteBuffer.allocate( inBuffer.remaining() );
-			while (!requestComplete && inBuffer.hasRemaining() && request.length() < request.capacity()) {
-				char ch = (char) inBuffer.get();
-				Debug.DEBUG("Ch: " + ch);
-				request.append(ch);
-				if (ch == '\r' || ch == '\n') {
-					requestComplete = true;
-					// client.shutdownInput();
-					Debug.DEBUG("handleRead: find terminating chars");
-				} // end if
-			} // end of while
-		}
+		inBuffer.flip(); // read input
 
+		while (!requestComplete && inBuffer.hasRemaining() && line_buffer.length() < line_buffer.capacity()) {
+			char ch = (char) inBuffer.get();
+			switch(currentReadState){
+				case REQUEST_METHOD:
+					if (ch == ' ') { // Handle a whitespace character
+						currentReadState = ReadStates.REQUEST_TARGET;
+						method = line_buffer.toString();
+						line_buffer.setLength(0);
+					}
+					else if (ch == '\r' || ch == '\n') handleException();// INVALID FORMATTING throw exception
+					else line_buffer.append(ch);
+					break;
+				case REQUEST_TARGET:
+					if (ch == ' ') { // Handle a whitespace character
+						currentReadState = ReadStates.REQUEST_PROTOCOL;
+						target = line_buffer.toString();
+						line_buffer.setLength(0);
+					}
+					else if (ch == '\r' || ch == '\n') handleException();// INVALID FORMATTING throw exception
+					else line_buffer.append(ch);
+					break;
+				case REQUEST_PROTOCOL:
+					if (ch == '\n'){
+						currentReadState = ReadStates.REQUEST_HEADERS;
+						protocol = line_buffer.toString();
+						line_buffer.setLength(0);
+					}
+					else if (ch == '\r'){}  // INVALID FORMATTING throw exception
+					else line_buffer.append(ch);
+				case REQUEST_HEADERS:
+					if (ch == '\n'){
+						processLineBufferHeader();
+					}
+					else if (ch == '\r') {}
+					else line_buffer.append(ch);
+				
+			} // end of switch
+		} // end of while
 		inBuffer.clear(); // we do not keep things in the inBuffer
 
-		if (requestComplete) {
+		if (requestComplete) { 
 			generateResponse();
 		}
-
 	} // end of process input
 
+	private void processLineBufferHeader(){
 
-
-
+	}
 
 
 
