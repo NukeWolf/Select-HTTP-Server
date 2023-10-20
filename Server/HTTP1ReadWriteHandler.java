@@ -22,6 +22,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 
 	private HashMap<String,String> headers;
 	private String body;
+	private int bodyByteCount;
 
 	private enum ReadStates { REQUEST_METHOD, REQUEST_TARGET, REQUEST_PROTOCOL, REQUEST_HEADERS, REQUEST_BODY, REQUEST_COMPLETE}
 	private ReadStates currentReadState;
@@ -37,6 +38,9 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		responseReady = false;
 		responseSent = false;
 		channelClosed = false;
+
+		bodyByteCount = 0;
+
 
 		line_buffer = new StringBuffer(4096);
 		headers = new HashMap<String,String>();
@@ -76,7 +80,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		 */
 
 		int nextState = key.interestOps();
-		if (requestComplete) {
+		if (currentReadState == ReadStates.REQUEST_COMPLETE) {
 			nextState = nextState & ~SelectionKey.OP_READ;
 			Debug.DEBUG("New state: -Read since request parsed complete");
 		} else {
@@ -130,13 +134,13 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 
 		// If no bytes to read. TODO: Not sure if right as a request ends in a CRLF.
 		if (readBytes == -1) { 
-			// requestComplete = true;
+			requestComplete = true;
 			return;
 		} 
 
 		inBuffer.flip(); // read input
 
-		while (!requestComplete && inBuffer.hasRemaining() && line_buffer.length() < line_buffer.capacity()) {
+		while (currentReadState != ReadStates.REQUEST_COMPLETE && inBuffer.hasRemaining() && line_buffer.length() < line_buffer.capacity()) {
 			char ch = (char) inBuffer.get();
 			switch(currentReadState){
 				case REQUEST_METHOD:
@@ -144,6 +148,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 						currentReadState = ReadStates.REQUEST_TARGET;
 						method = line_buffer.toString();
 						line_buffer.setLength(0);
+						Debug.DEBUG("METHOD:" + method);
 					}
 					else if (ch == '\r' || ch == '\n') handleException();// INVALID FORMATTING throw exception
 					else line_buffer.append(ch);
@@ -153,6 +158,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 						currentReadState = ReadStates.REQUEST_PROTOCOL;
 						target = line_buffer.toString();
 						line_buffer.setLength(0);
+						Debug.DEBUG("Target:" + target);
 					}
 					else if (ch == '\r' || ch == '\n') handleException();// INVALID FORMATTING throw exception
 					else line_buffer.append(ch);
@@ -162,42 +168,86 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 						currentReadState = ReadStates.REQUEST_HEADERS;
 						protocol = line_buffer.toString();
 						line_buffer.setLength(0);
+						Debug.DEBUG("Protocol:" + protocol);
 					}
 					else if (ch == '\r'){}  // INVALID FORMATTING throw exception
 					else line_buffer.append(ch);
+					break;
 				case REQUEST_HEADERS:
 					if (ch == '\n'){
-						processLineBufferHeader();
+						Debug.DEBUG("Header : " + line_buffer.toString());
+						if(!processLineBufferHeader()){
+							if(headers.get("Content-Length") == null){
+								currentReadState = ReadStates.REQUEST_COMPLETE;
+
+							}
+							else{
+								if(headers.get("Content-Length").matches("[0-9]+")){
+									currentReadState = ReadStates.REQUEST_BODY;
+								}
+								else{
+									handleException();
+								}
+							}
+						}
+						line_buffer.setLength(0);
 					}
 					else if (ch == '\r') {}
 					else line_buffer.append(ch);
-				
+					break;
+				case REQUEST_BODY:
+					int maxbytes = Integer.parseInt(headers.get("Content-Length"));
+					if (bodyByteCount >= maxbytes){
+						currentReadState = ReadStates.REQUEST_COMPLETE;
+						body = line_buffer.toString();
+					}
+					else{
+						line_buffer.append(ch);
+						bodyByteCount += 1;
+					}
+					break;
+				case REQUEST_COMPLETE:
+					break;
 			} // end of switch
 		} // end of while
 		inBuffer.clear(); // we do not keep things in the inBuffer
 
-		if (requestComplete) { 
-			generateResponse();
+		if (currentReadState == ReadStates.REQUEST_COMPLETE) { 
+			//validateRequest();
+			//generateResponse();
 		}
 	} // end of process input
 
-	private void processLineBufferHeader(){
-
+	// Returns true if header is added. False if empty space was detected and no header was added.
+	private Boolean processLineBufferHeader(){
+		String s = line_buffer.toString();
+		if (s.length() == 0){
+			return false;
+		}
+		String[] headerInfo = s.split(":");
+		if (headerInfo.length < 2){
+			handleException();
+			return false;
+		}
+		String fieldName = headerInfo[0];
+		String fieldValue = headerInfo[1].trim();
+		headers.put(fieldName,fieldValue);
+		return true;
 	}
 
 
 
 	
-	private void generateResponse() {
-		for (int i = 0; i < request.length(); i++) {
-			char ch = (char) request.charAt(i);
+	// private void generateResponse() {
+	// 	for (int i = 0; i < request.length(); i++) {
+	// 		char ch = (char) request.charAt(i);
 
-			ch = Character.toUpperCase(ch);
+	// 		ch = Character.toUpperCase(ch);
 
-			outBuffer.put((byte) ch);
-		}
-		outBuffer.flip();
-		responseReady = true;
-	} // end of generate response
+	// 		outBuffer.put((byte) ch);
+	// 	}
+	// 	outBuffer.flip();
+	// 	responseReady = true;
+	// } // end of generate response
 
 }

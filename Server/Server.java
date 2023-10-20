@@ -47,8 +47,9 @@ public class Server {
 		ServerSocketChannel sch = openServerChannel(port);
 
 		// create server acceptor for Echo Line ReadWrite Handler
-		ISocketReadWriteHandlerFactory echoFactory = new EchoLineReadWriteHandlerFactory();
-		Acceptor acceptor = new Acceptor(echoFactory);
+		// ISocketReadWriteHandlerFactory echoFactory = new EchoLineReadWriteHandlerFactory();
+		ISocketReadWriteHandlerFactory readFactory = new HTTP1ReadWriteHandlerFactory();
+		Acceptor acceptor = new Acceptor(readFactory);
 
 		Thread dispatcherThread;
 		// register the server channel to a selector
