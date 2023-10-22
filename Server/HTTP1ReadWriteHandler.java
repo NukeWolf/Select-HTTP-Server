@@ -2,20 +2,25 @@ package Server;
 import java.nio.*;
 import java.nio.channels.*;
 import java.util.HashMap;
+import java.util.TimeZone;
 import java.io.IOException;
+import java.io.File;
+import java.io.FileInputStream;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 
 public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 
+	//Sockets
 	private ByteBuffer inBuffer;
 	private ByteBuffer outBuffer;
-
-	private boolean requestComplete;
-	private boolean responseReady;
-	private boolean responseSent;
-	private boolean channelClosed;
-
+	private ByteBuffer fileBuffer;
+	
+	// Request Fields
 	private StringBuffer line_buffer;
-
 	private String method;
 	private String target;
 	private String protocol;
@@ -24,8 +29,23 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 	private String body;
 	private int bodyByteCount;
 
+	//Response Fields
+	private String response_status_code;
+	private String response_status_msg;
+
+	private HashMap<String,String> outheaders;
+
+	//States
 	private enum ReadStates { REQUEST_METHOD, REQUEST_TARGET, REQUEST_PROTOCOL, REQUEST_HEADERS, REQUEST_BODY, REQUEST_COMPLETE}
+	private enum WriteStates { RESPONSE_CREATION, RESPONSE_READY, RESPONSE_SENDING, RESPONSE_SENT}
 	private ReadStates currentReadState;
+	private WriteStates currentWriteState;
+
+	private boolean requestComplete;
+	private boolean responseReady;
+	private boolean responseSent;
+
+	private boolean channelClosed;
 
 	// private State state;
 
@@ -41,10 +61,12 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 
 		bodyByteCount = 0;
 
-
 		line_buffer = new StringBuffer(4096);
 		headers = new HashMap<String,String>();
 		currentReadState = ReadStates.REQUEST_METHOD;
+		currentWriteState = WriteStates.RESPONSE_CREATION;
+		outheaders = new HashMap<String,String>();
+
 	}
 
 	public int getInitOps() {
@@ -52,6 +74,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 	}
 
 	public void handleException() {
+
 	}
 
 	public void handleRead(SelectionKey key) throws IOException {
@@ -67,6 +90,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		updateSelectorState(key);
 
 	} // end of handleRead
+
 
 	private void updateSelectorState(SelectionKey key) throws IOException {
 
@@ -87,35 +111,68 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 			nextState = nextState | SelectionKey.OP_READ;
 			Debug.DEBUG("New state: +Read to continue to read");
 		}
-
-		if (responseReady) {
-			if (!responseSent) {
+		if(currentReadState == ReadStates.REQUEST_COMPLETE){
+			if (currentWriteState == WriteStates.RESPONSE_READY || currentWriteState == WriteStates.RESPONSE_SENDING) {
 				nextState = nextState | SelectionKey.OP_WRITE;
 				Debug.DEBUG("New state: +Write since response ready but not done sent");
-			} else {
-				nextState = nextState & ~SelectionKey.OP_WRITE;
-				Debug.DEBUG("New state: -Write since response ready and sent");
+			}
+			else {
+					nextState = nextState & ~SelectionKey.OP_WRITE;
+					Debug.DEBUG("New state: -Write since response ready and sent");
 			}
 		}
+		
 
 		key.interestOps(nextState);
 
 	}
 
-	public void handleWrite(SelectionKey key) throws IOException {
-		Debug.DEBUG("->handleWrite");
+	public void appendStringToByteBuf(ByteBuffer b, String s){
+		for (int i  = 0; i<s.length();i++){
+			b.put((byte) s.charAt(i));
+		}
+	}
 
+	public void generateResponseHeaders(){
+		String status_line = protocol + " " + response_status_code + " " + response_status_msg + "\r\n";
+		appendStringToByteBuf(outBuffer, status_line);
+		String date_header = "Date: " + OffsetDateTime.now().format(DateTimeFormatter.RFC_1123_DATE_TIME) + "\r\n";
+
+		appendStringToByteBuf(outBuffer, date_header);
+
+		outheaders.forEach((key,value) -> {
+			appendStringToByteBuf(outBuffer, key + ":" + value + "\r\n");
+		});
+		appendStringToByteBuf(outBuffer, "\r\n");
+
+		outBuffer.flip();
+	}
+
+	public void handleWrite(SelectionKey key) throws IOException {
+
+		if(currentWriteState==WriteStates.RESPONSE_SENT) return;
+		currentWriteState = WriteStates.RESPONSE_SENDING;
+
+		Debug.DEBUG("->handleWrite");
 		// process data
 		SocketChannel client = (SocketChannel) key.channel();
 		Debug.DEBUG("handleWrite: Write data to connection " + client + "; from buffer " + outBuffer);
+		
+		generateResponseHeaders();
+		
 		int writeBytes = client.write(outBuffer);
+
 		Debug.DEBUG("handleWrite: write " + writeBytes + " bytes; after write " + outBuffer);
 
 		if (responseReady && (outBuffer.remaining() == 0)) {
 			responseSent = true;
 			Debug.DEBUG("handleWrite: responseSent");
 		}
-
+		if(fileBuffer != null){
+			writeBytes = client.write(fileBuffer);
+		}
+		currentWriteState = WriteStates.RESPONSE_SENT;
+		
 		// update state
 		updateSelectorState(key);
 
@@ -129,12 +186,11 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		SocketChannel client = (SocketChannel) key.channel();
 		int readBytes = client.read(inBuffer);
 
-		Debug.DEBUG("handleRead: Read data from connection " + client + " for " + readBytes + " byte(s); to buffer "
-		+ inBuffer);
+		// Debug.DEBUG("handleRead: Read data from connection " + client + " for " + readBytes + " byte(s); to buffer "
+		// + inBuffer);
 
 		// If no bytes to read. TODO: Not sure if right as a request ends in a CRLF.
 		if (readBytes == -1) { 
-			requestComplete = true;
 			return;
 		} 
 
@@ -214,7 +270,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 
 		if (currentReadState == ReadStates.REQUEST_COMPLETE) { 
 			//validateRequest();
-			//generateResponse();
+			generateResponse();
 		}
 	} // end of process input
 
@@ -236,18 +292,83 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 	}
 
 
+	private byte[] file_to_bytearr(File f){
+		byte[] arr = new byte[(int)f.length()]; 
+		try{
+			FileInputStream fl = new FileInputStream(f);
+			fl.read(arr);
+			fl.close();
+		}
+		catch(Exception e){
+			return null;
+		}
+		
+		return arr;
+	}
+	
+	private void generateResponse() {
+		// generateHeaders();
+		if (!(currentWriteState == WriteStates.RESPONSE_CREATION)) return;
+
+		String Root = "/Users/whyalex/Desktop/Code Projects/CPSC434-HTTP-SERVER/www/example1";
+		File resource = new File(Root + target);
+
+		if(target == "/"){
+			String device = headers.get("User-Agent");
+			if(device.matches("iPhone|Mobile")){
+				resource = new File (Root + "/index_m.html");
+			}
+			else{
+				resource = new File (Root + "/index.html");
+			}
+
+		}
+		if(resource.isDirectory()) {
+			Debug.DEBUG("Looking for Index.html");
+			resource = new File(Root+target+"index.html");
+		}
+
+		if (!resource.exists()){
+			response_status_code = "404";
+			response_status_msg = "Resource Not Found";
+			outheaders.put("Content-Length","0");
+			currentWriteState = WriteStates.RESPONSE_READY;
+			return;
+		}
+
+		if (!resource.canRead()){
+			response_status_code = "403";
+			response_status_msg = "Can't Read Resource";
+			currentWriteState = WriteStates.RESPONSE_READY;
+			return;
+		}
+
+		fileBuffer = ByteBuffer.wrap(file_to_bytearr(resource));
+
+		if(fileBuffer == null){
+			response_status_code = "500";
+			response_status_msg = "File couldn't be read.";
+			currentWriteState = WriteStates.RESPONSE_READY;
+			return;
+		}
+		
+		LocalDateTime lastModified = LocalDateTime.ofInstant(Instant.ofEpochMilli(resource.lastModified()), 
+                                TimeZone.getDefault().toZoneId()); 
+		OffsetDateTime odt_last_modified = lastModified.atOffset(ZoneOffset.UTC);
+		Debug.DEBUG(lastModified.toString());
+		outheaders.put("Last-Modified",odt_last_modified.format(DateTimeFormatter.RFC_1123_DATE_TIME));
+
+		outheaders.put("Content-Length",Long.toString(resource.length()));
+
+		outheaders.put("Connection","keep-alive");
+
+		response_status_code = "200";
+		response_status_msg = "File Found";
+		currentWriteState = WriteStates.RESPONSE_READY;
+		return;
+	} // end of generate response
+
+
 
 	
-	// private void generateResponse() {
-	// 	for (int i = 0; i < request.length(); i++) {
-	// 		char ch = (char) request.charAt(i);
-
-	// 		ch = Character.toUpperCase(ch);
-
-	// 		outBuffer.put((byte) ch);
-	// 	}
-	// 	outBuffer.flip();
-	// 	responseReady = true;
-	// } // end of generate response
-
 }
