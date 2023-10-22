@@ -1,4 +1,4 @@
-package Server;
+package server;
 import java.nio.channels.SelectionKey;
 import java.io.IOException;
 
