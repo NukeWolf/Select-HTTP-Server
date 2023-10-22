@@ -1,4 +1,4 @@
-package Server;
+package server;
 import java.nio.*;
 import java.nio.channels.*;
 import java.io.IOException;

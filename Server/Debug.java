@@ -1,4 +1,4 @@
-package Server;
+package server;
 public class Debug {
 
     private static boolean DEBUG = true;

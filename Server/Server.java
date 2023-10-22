@@ -1,11 +1,18 @@
-package Server;
+package server;
+
 import java.nio.channels.*;
 import java.net.*;
+
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import java.io.IOException;
 
 public class Server {
 
-	public static int DEFAULT_PORT = 6789;
+	public static ServerConfig serverConfig;
 
 	public static ServerSocketChannel openServerChannel(int port) {
 		ServerSocketChannel serverChannel = null;
@@ -34,17 +41,17 @@ public class Server {
 
 	public static void main(String[] args) {
 
+		// configure server
+		serverConfig = new ServerConfig();
+		if (args.length == 2) {
+			serverConfig.parseConfigurationFile(args[1]);
+		}
+
 		// get dispatcher/selector
 		Dispatcher dispatcher = new Dispatcher();
 
 		// open server socket channel
-		int port;
-		try {
-			port = Integer.parseInt(args[0]);
-		} catch (Exception ex) {
-			port = DEFAULT_PORT;
-		}
-		ServerSocketChannel sch = openServerChannel(port);
+		ServerSocketChannel sch = openServerChannel(serverConfig.getPort());
 
 		// create server acceptor for Echo Line ReadWrite Handler
 		// ISocketReadWriteHandlerFactory echoFactory = new EchoLineReadWriteHandlerFactory();
