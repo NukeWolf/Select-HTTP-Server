@@ -1,4 +1,6 @@
 package server;
+import server.Htaccess;
+
 import java.nio.*;
 import java.nio.channels.*;
 import java.util.HashMap;
@@ -11,6 +13,7 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.nio.file.Path;
 
 public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 
@@ -37,26 +40,22 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 
 	//States
 	private enum ReadStates { REQUEST_METHOD, REQUEST_TARGET, REQUEST_PROTOCOL, REQUEST_HEADERS, REQUEST_BODY, REQUEST_COMPLETE}
-	private enum WriteStates { RESPONSE_CREATION, RESPONSE_READY, RESPONSE_SENDING, RESPONSE_SENT}
+	private enum WriteStates { RESPONSE_CREATION, RESPONSE_READY, RESPONSE_SENDING_HEADERS, RESPONSE_SENDING_BODY, RESPONSE_SENT}
 	private ReadStates currentReadState;
 	private WriteStates currentWriteState;
 
-	private boolean requestComplete;
-	private boolean responseReady;
-	private boolean responseSent;
-
 	private boolean channelClosed;
 
+	private final int REQUEST_TIMEOUT = 3;
 	// private State state;
 
 	public HTTP1ReadWriteHandler() {
 		inBuffer = ByteBuffer.allocate(4096);
 		outBuffer = ByteBuffer.allocate(4096);
+		fileBuffer = null;
+
 
 		// initial state
-		requestComplete = false;
-		responseReady = false;
-		responseSent = false;
 		channelClosed = false;
 
 		bodyByteCount = 0;
@@ -69,6 +68,25 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 
 	}
 
+	private void reset_handler(){
+		inBuffer = ByteBuffer.allocate(4096);
+		outBuffer = ByteBuffer.allocate(4096);
+		fileBuffer = null;
+		
+
+		// initial state
+		channelClosed = false;
+
+		bodyByteCount = 0;
+
+		line_buffer = new StringBuffer(4096);
+		headers = new HashMap<String,String>();
+		currentReadState = ReadStates.REQUEST_METHOD;
+		currentWriteState = WriteStates.RESPONSE_CREATION;
+		outheaders = new HashMap<String,String>();
+	}
+
+
 	public int getInitOps() {
 		return SelectionKey.OP_READ;
 	}
@@ -79,7 +97,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 
 	public void handleRead(SelectionKey key) throws IOException {
 
-		if (requestComplete) { // this call should not happen, ignore
+		if (currentReadState == ReadStates.REQUEST_COMPLETE) { // this call should not happen, ignore
 			return;
 		}
 
@@ -97,11 +115,26 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		if (channelClosed)
 			return;
 
-		/*
-		 * if (responseSent) { Debug.DEBUG(
-		 * "***Response sent; shutdown connection"); client.close();
-		 * dispatcher.deregisterSelection(sk); channelClosed = true; return; }
-		 */
+		
+		// Keep-Connection Alive or not.
+		if (currentWriteState == WriteStates.RESPONSE_SENT) { 
+			if(headers.get("Connection") != null && headers.get("Connection").equals("closed")){
+				Debug.DEBUG("***Response sent; shutdown connection"); 
+				ServerSocketChannel client = (ServerSocketChannel) key.channel();
+				client.close();
+				key.cancel();
+				channelClosed = true; 
+				return;
+			}
+			// Default is keep connection alive
+			else{
+				Debug.DEBUG("***Response sent; keep-connection alive"); 
+				key.interestOps(getInitOps());
+				reset_handler();
+				return;
+			}
+		}
+		 
 
 		int nextState = key.interestOps();
 		if (currentReadState == ReadStates.REQUEST_COMPLETE) {
@@ -112,7 +145,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 			Debug.DEBUG("New state: +Read to continue to read");
 		}
 		if(currentReadState == ReadStates.REQUEST_COMPLETE){
-			if (currentWriteState == WriteStates.RESPONSE_READY || currentWriteState == WriteStates.RESPONSE_SENDING) {
+			if (currentWriteState == WriteStates.RESPONSE_READY || currentWriteState == WriteStates.RESPONSE_SENDING_BODY || currentWriteState == WriteStates.RESPONSE_SENDING_HEADERS) {
 				nextState = nextState | SelectionKey.OP_WRITE;
 				Debug.DEBUG("New state: +Write since response ready but not done sent");
 			}
@@ -151,27 +184,40 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 	public void handleWrite(SelectionKey key) throws IOException {
 
 		if(currentWriteState==WriteStates.RESPONSE_SENT) return;
-		currentWriteState = WriteStates.RESPONSE_SENDING;
+		if(currentWriteState==WriteStates.RESPONSE_READY) {
+			generateResponseHeaders();
+			currentWriteState = WriteStates.RESPONSE_SENDING_HEADERS;
+		}
 
 		Debug.DEBUG("->handleWrite");
 		// process data
 		SocketChannel client = (SocketChannel) key.channel();
 		Debug.DEBUG("handleWrite: Write data to connection " + client + "; from buffer " + outBuffer);
 		
-		generateResponseHeaders();
+		// Send Headers
+		if (currentWriteState == WriteStates.RESPONSE_SENDING_HEADERS){
+			int writeBytes = client.write(outBuffer);
+			if (outBuffer.remaining() == 0) {
+				currentWriteState = WriteStates.RESPONSE_SENDING_BODY;
+				Debug.DEBUG("handleWrite: headersSent");
+			}
+			Debug.DEBUG("handleWrite: write " + writeBytes + " bytes; after write " + outBuffer);
+		}
 		
-		int writeBytes = client.write(outBuffer);
-
-		Debug.DEBUG("handleWrite: write " + writeBytes + " bytes; after write " + outBuffer);
-
-		if (responseReady && (outBuffer.remaining() == 0)) {
-			responseSent = true;
-			Debug.DEBUG("handleWrite: responseSent");
+		//Send the body
+		if(currentWriteState == WriteStates.RESPONSE_SENDING_BODY){
+			if(fileBuffer != null){
+				client.write(fileBuffer);
+				if (fileBuffer.remaining() == 0){
+					currentWriteState = WriteStates.RESPONSE_SENT;
+				}
+			}
+			else{
+				currentWriteState = WriteStates.RESPONSE_SENT;
+			}
 		}
-		if(fileBuffer != null){
-			writeBytes = client.write(fileBuffer);
-		}
-		currentWriteState = WriteStates.RESPONSE_SENT;
+
+		
 		
 		// update state
 		updateSelectorState(key);
@@ -309,9 +355,13 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		// generateHeaders();
 		if (!(currentWriteState == WriteStates.RESPONSE_CREATION)) return;
 
+		//By Default all error messages have no content. Eventually put into a handle exception call.
+		outheaders.put("Content-Length","0");
+
 		String Root = "/Users/whyalex/Desktop/Code Projects/CPSC434-HTTP-SERVER/www/example1";
 		File resource = new File(Root + target);
 
+		//Mobile Content Check
 		if(target == "/"){
 			String device = headers.get("User-Agent");
 			if(device.matches("iPhone|Mobile")){
@@ -320,21 +370,23 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 			else{
 				resource = new File (Root + "/index.html");
 			}
-
+		
+		// Directory Check and change to index.html
 		}
 		if(resource.isDirectory()) {
 			Debug.DEBUG("Looking for Index.html");
 			resource = new File(Root+target+"index.html");
 		}
 
+		//Check if URL exists.
 		if (!resource.exists()){
 			response_status_code = "404";
 			response_status_msg = "Resource Not Found";
-			outheaders.put("Content-Length","0");
 			currentWriteState = WriteStates.RESPONSE_READY;
 			return;
 		}
 
+		//Check if URL is readable
 		if (!resource.canRead()){
 			response_status_code = "403";
 			response_status_msg = "Can't Read Resource";
@@ -342,8 +394,33 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 			return;
 		}
 
-		fileBuffer = ByteBuffer.wrap(file_to_bytearr(resource));
+		//Check for Authorization
+		Path htacessPath = resource.getParentFile().toPath().resolve(".htaccess");
+		File access = htacessPath.toFile();
+		if (access.exists()){
+			Htaccess auth = new Htaccess(access);
+			if (headers.get("Authorization") != null){
+				if (!auth.authenticateToken(headers.get("Authorization"))){
+					Debug.DEBUG("Wrong Token");
+					response_status_code = "401";
+					response_status_msg = "Invalid Credentials";
+					outheaders.put("WWW-Authenticate", "Basic realm=\"Restricted Files\"");
+					currentWriteState = WriteStates.RESPONSE_READY;
+					return;
+				}
+			}
+			else{
+				Debug.DEBUG("UNAUTHORIZED");
+				response_status_code = "401";
+				response_status_msg = "Unauthorized";
+				outheaders.put("WWW-Authenticate", "Basic realm=\"Restricted Files\"");
+				currentWriteState = WriteStates.RESPONSE_READY;
+				return;
+			}
+		}
 
+		
+		fileBuffer = ByteBuffer.wrap(file_to_bytearr(resource));	
 		if(fileBuffer == null){
 			response_status_code = "500";
 			response_status_msg = "File couldn't be read.";
@@ -351,21 +428,23 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 			return;
 		}
 		
+
+		// File Specific Headers
 		LocalDateTime lastModified = LocalDateTime.ofInstant(Instant.ofEpochMilli(resource.lastModified()), 
                                 TimeZone.getDefault().toZoneId()); 
 		OffsetDateTime odt_last_modified = lastModified.atOffset(ZoneOffset.UTC);
-		Debug.DEBUG(lastModified.toString());
 		outheaders.put("Last-Modified",odt_last_modified.format(DateTimeFormatter.RFC_1123_DATE_TIME));
-
 		outheaders.put("Content-Length",Long.toString(resource.length()));
-
-		outheaders.put("Connection","keep-alive");
 
 		response_status_code = "200";
 		response_status_msg = "File Found";
+		
 		currentWriteState = WriteStates.RESPONSE_READY;
 		return;
 	} // end of generate response
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> 732e6d29c0ba585c15c23d54acbee0e2eaa0452c
 }
