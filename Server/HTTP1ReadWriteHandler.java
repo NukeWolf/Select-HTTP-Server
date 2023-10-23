@@ -1,4 +1,6 @@
 package server;
+import server.Htaccess;
+
 import java.nio.*;
 import java.nio.channels.*;
 import java.util.HashMap;
@@ -44,6 +46,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 
 	private boolean channelClosed;
 
+	private final int REQUEST_TIMEOUT = 3;
 	// private State state;
 
 	public HTTP1ReadWriteHandler() {
@@ -334,7 +337,6 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		return true;
 	}
 
-
 	private byte[] file_to_bytearr(File f){
 		byte[] arr = new byte[(int)f.length()]; 
 		try{
@@ -352,6 +354,9 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 	private void generateResponse() {
 		// generateHeaders();
 		if (!(currentWriteState == WriteStates.RESPONSE_CREATION)) return;
+
+		//By Default all error messages have no content. Eventually put into a handle exception call.
+		outheaders.put("Content-Length","0");
 
 		String Root = "/Users/whyalex/Desktop/Code Projects/CPSC434-HTTP-SERVER/www/example1";
 		File resource = new File(Root + target);
@@ -377,7 +382,6 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		if (!resource.exists()){
 			response_status_code = "404";
 			response_status_msg = "Resource Not Found";
-			outheaders.put("Content-Length","0");
 			currentWriteState = WriteStates.RESPONSE_READY;
 			return;
 		}
@@ -394,7 +398,25 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		Path htacessPath = resource.getParentFile().toPath().resolve(".htaccess");
 		File access = htacessPath.toFile();
 		if (access.exists()){
-			
+			Htaccess auth = new Htaccess(access);
+			if (headers.get("Authorization") != null){
+				if (!auth.authenticateToken(headers.get("Authorization"))){
+					Debug.DEBUG("Wrong Token");
+					response_status_code = "401";
+					response_status_msg = "Invalid Credentials";
+					outheaders.put("WWW-Authenticate", "Basic realm=\"Restricted Files\"");
+					currentWriteState = WriteStates.RESPONSE_READY;
+					return;
+				}
+			}
+			else{
+				Debug.DEBUG("UNAUTHORIZED");
+				response_status_code = "401";
+				response_status_msg = "Unauthorized";
+				outheaders.put("WWW-Authenticate", "Basic realm=\"Restricted Files\"");
+				currentWriteState = WriteStates.RESPONSE_READY;
+				return;
+			}
 		}
 
 		
@@ -406,8 +428,6 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 			return;
 		}
 		
-
-
 
 		// File Specific Headers
 		LocalDateTime lastModified = LocalDateTime.ofInstant(Instant.ofEpochMilli(resource.lastModified()), 
@@ -423,7 +443,4 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		return;
 	} // end of generate response
 
-
-
-	
 }
