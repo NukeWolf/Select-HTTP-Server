@@ -10,9 +10,11 @@ public class Htaccess {
     public String authName;
     private String user_encoded;
     private String pass_encoded;
+    private boolean authenticated;
 
     public Htaccess(File f){
         parseFile(f);
+        authenticated = false;
     }
 
     public void parseFile(File f){
@@ -66,6 +68,16 @@ public class Htaccess {
         matcher.find();
         String type = matcher.group(1);
         String encoded_token = matcher.group(2);
-        return encodedString.equals(encoded_token) && type.equals(authType);
+        
+        authenticated = encodedString.equals(encoded_token) && type.equals(authType);
+        return authenticated;
+    }
+    public String getAuthType(){
+        return authType;
+    }
+    public String getUser(){
+        byte[] decodedBytes_user = Base64.getDecoder().decode(user_encoded);
+        String decodedUser = new String(decodedBytes_user);
+        return decodedUser;
     }
 }

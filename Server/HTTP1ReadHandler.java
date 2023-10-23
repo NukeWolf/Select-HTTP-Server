@@ -2,12 +2,15 @@ package server;
 
 import java.nio.ByteBuffer;
 import java.util.HashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class HTTP1ReadHandler {
     // Request Fields
 	private StringBuffer line_buffer;
 	public String method;
 	public String target;
+    public String query_string;
 	public String protocol;
 
 	public HashMap<String,String> headers;
@@ -49,9 +52,10 @@ public class HTTP1ReadHandler {
 				case REQUEST_TARGET:
 					if (ch == ' ') { // Handle a whitespace character
 						currentReadState = ReadStates.REQUEST_PROTOCOL;
-						target = line_buffer.toString();
+						parseTargetLine();
 						line_buffer.setLength(0);
-						Debug.DEBUG("Target:" + target);
+                        Debug.DEBUG("Target: " + target);
+                        Debug.DEBUG("Query: " + query_string);
 					}
 					else if (ch == '\r' || ch == '\n') handleException();// INVALID FORMATTING throw exception
 					else line_buffer.append(ch);
@@ -123,6 +127,29 @@ public class HTTP1ReadHandler {
 		headers.put(fieldName,fieldValue);
 		return true;
 	}
+    //Seperates the query string
+    private void parseTargetLine(){
+        String matchregex = "([\\/\\\\a-zA-Z0-9\\.-]+)(\\?.+)?";
+        Pattern pattern = Pattern.compile(matchregex);
+        Matcher matcher = pattern.matcher(line_buffer.toString());
+        try{
+            matcher.find();
+            target = matcher.group(1);
+            query_string = matcher.group(2);
+            if (query_string == null){
+                query_string = "";
+            }
+            else{
+                query_string = query_string.substring(1);
+            }
+        }
+        catch (Exception e){
+            handleException();
+            e.printStackTrace();
+        }
+        
+
+    }
 
     public boolean isRequestComplete(){
         return (currentReadState == ReadStates.REQUEST_COMPLETE || currentReadState == ReadStates.REQUEST_PARSE_ERROR);

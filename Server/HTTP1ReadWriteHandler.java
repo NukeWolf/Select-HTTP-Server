@@ -9,9 +9,7 @@ import java.nio.channels.*;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.TimeZone;
-import java.io.IOException;
-import java.io.File;
-import java.io.FileInputStream;
+import java.io.*;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
@@ -25,6 +23,8 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 	private ByteBuffer inBuffer;
 	private ByteBuffer outBuffer;
 	private ByteBuffer fileBuffer;
+	//CGI Handling
+	Process cgi; 
 
 	// Buffer Handlers
 	private HTTP1ReadHandler requestHandler;
@@ -168,7 +168,40 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		if(writeHandler.isSendingBody()){
 			writeHandler.sendBody(client, fileBuffer);
 		}
-		
+
+		if(writeHandler.needsCGIchunk()){
+			InputStream scriptOutput = cgi.getInputStream();
+			int bytesToRead = scriptOutput.available();
+			Debug.DEBUG("Bytes Predicted: " + bytesToRead);
+			Debug.DEBUG("Is process running:" + cgi.isAlive());
+			// If nothing left in the stream and the process has terminated.
+			if(!cgi.isAlive() && bytesToRead == 0){
+				outBuffer.clear();
+				writeHandler.generateCGIChunk(outBuffer,new byte[0],0);
+				writeHandler.sendCGITerminator(client, outBuffer);
+			}
+			else{
+				if (bytesToRead == 0){
+					Debug.DEBUG("No Bytes ready from output");
+					return;
+				}
+
+				byte b[] = new byte[bytesToRead];
+				int bytesRead = scriptOutput.read(b);
+				Debug.DEBUG("CGI Chunk length: " + bytesRead);
+				outBuffer.clear();
+				writeHandler.generateCGIChunk(outBuffer, b, bytesRead);
+				writeHandler.setSendingCGI();
+			}
+		}
+
+		if(writeHandler.isSendingCGI()){
+			writeHandler.sendCGI(client, outBuffer);
+		}
+
+		if(writeHandler.isSendingCGITerminator()){
+			writeHandler.sendCGITerminator(client, outBuffer);
+		}
 		
 		// update state
 		updateSelectorState(key);
@@ -202,7 +235,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 
 		if (requestHandler.isRequestComplete()) { 
 			//validateRequest();
-			generateResponse();
+			generateResponse(client);
 		}
 	} // end of process input
 
@@ -221,8 +254,8 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		return arr;
 	}
 	
-	private void generateResponse() {
-
+	private void generateResponse(SocketChannel client) {
+		
 		// If Response has already been created, don't run
 		if (!writeHandler.isCreatingResponse()) return;
 
@@ -257,15 +290,17 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 			writeHandler.setStatusLine("404","Not Found");
 			return;
 		}
+		
 
 
 		//Check for Authorization
 		Path htacessPath = resource.getParentFile().toPath().resolve(".htaccess");
 		File access = htacessPath.toFile();
+		Htaccess auth = null;
 		if (access.exists()){
-			Htaccess auth = new Htaccess(access);
 			// Confirm Authorization Token.
 			if (headers.get("Authorization") != null){
+				auth = new Htaccess(access);
 				if (!auth.authenticateToken(headers.get("Authorization"))){
 					Debug.DEBUG("Wrong Token");
 					writeHandler.addOutputHeader("WWW-Authenticate", "Basic realm=\"Restricted Files\"");
@@ -281,6 +316,13 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 				return;
 			}
 		}
+		// File Specific Headers
+		LocalDateTime lastModified = LocalDateTime.ofInstant(Instant.ofEpochMilli(resource.lastModified()), 
+                                TimeZone.getDefault().toZoneId()); 
+		OffsetDateTime odt_last_modified = lastModified.atOffset(ZoneOffset.UTC);
+		writeHandler.addOutputHeader("Last-Modified",odt_last_modified.format(DateTimeFormatter.RFC_1123_DATE_TIME));
+
+
 
 		
 		// Executable Check
@@ -289,13 +331,31 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 				writeHandler.setStatusLine("403", "Can't Execute Resource");
 				return;
 			}
-			// ProcessBuilder pb = new ProcessBuilder("myCommand", "myArg1", "myArg2");
-			// Map<String, String> env = pb.environment();
-			// env.put("VAR1", "myValue");
-			// env.remove("OTHERVAR");
-			// env.put("VAR2", env.get("VAR1") + "suffix");
-			// pb.directory("myDir");
-			// Process p = pb.start();
+			Debug.DEBUG("Execeuting CGI");
+			ProcessBuilder pb = new ProcessBuilder(resource.getAbsolutePath());
+			Map<String, String> env = pb.environment();
+			//env.put("AUTH_TYPE", headers.get("Authorization"));
+			env.put("QUERY_STRING", requestHandler.query_string);
+			env.put("REQUEST_METHOD", requestHandler.method);
+			// env.put("CONTENT_TYPE",headers.get("Content-Type"));
+			// env.put("CONTENT_LENGTH",headers.get("Content-Length"));
+			env.put("REMOTE_ADDR", client.socket().getInetAddress().toString());
+			env.put("REMOTE_HOST",client.socket().getInetAddress().getHostName());
+			env.put("SERVER_PORT", Integer.toString( client.socket().getLocalPort()));
+			try{
+				cgi = pb.start();
+				writeHandler.setStatusLine("200", "File Found");
+				writeHandler.sendcgi = true;
+				writeHandler.removeOutputHeader("Content-Length");
+				writeHandler.addOutputHeader("Transfer-Encoding", "chunked");
+				//writeHandler.addOutputHeader("Content-Type","text/plain");
+				return;
+			}
+			catch (Exception e){
+				writeHandler.setStatusLine("500", "Server Error");
+				return;
+			}
+			
 		}
 
 
@@ -310,15 +370,9 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 			writeHandler.setStatusLine("403", "Can't read resource");
 			return;
 		}
-		
-		// File Specific Headers
-		LocalDateTime lastModified = LocalDateTime.ofInstant(Instant.ofEpochMilli(resource.lastModified()), 
-                                TimeZone.getDefault().toZoneId()); 
-		OffsetDateTime odt_last_modified = lastModified.atOffset(ZoneOffset.UTC);
-		writeHandler.addOutputHeader("Last-Modified",odt_last_modified.format(DateTimeFormatter.RFC_1123_DATE_TIME));
 		writeHandler.addOutputHeader("Content-Length",Long.toString(resource.length()));
-
 		writeHandler.setStatusLine("200", "File Found");
+		writeHandler.sendbody = true;
 		return;
 	} // end of generate response
 
