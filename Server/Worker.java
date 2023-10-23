@@ -31,6 +31,7 @@ public class Worker implements Runnable {
 	 * sk.interestOps(newOps); }
 	 */
 
+		// need these debug statements to run correctly for some reason????
 	public void run() {
 
 		while (true) {
@@ -43,14 +44,22 @@ public class Worker implements Runnable {
 				break;
 			}
 
+							Debug.DEBUG("worker 1");
 			// readKeys is a set of ready events
 			Set<SelectionKey> readyKeys = selector.selectedKeys();
+
+
+							Debug.DEBUG("worker 2");
 
 			// create an iterator for the set
 			Iterator<SelectionKey> iterator = readyKeys.iterator();
 
+
+							Debug.DEBUG("worker 3");
+
 			// iterate over all events
 			while (iterator.hasNext()) {
+							Debug.DEBUG("worker 4");
 
 				SelectionKey key = (SelectionKey) iterator.next();
 				iterator.remove();
@@ -79,7 +88,9 @@ public class Worker implements Runnable {
 				} // end of catch
 
 			} // end of while (iterator.hasNext()) {
+							Debug.DEBUG("worker 5");
 				
 		} // end of while (true)
+							Debug.DEBUG("worker 6");
 	} // end of run
 }

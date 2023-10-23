@@ -443,8 +443,4 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		return;
 	} // end of generate response
 
-<<<<<<< HEAD
-
-=======
->>>>>>> 732e6d29c0ba585c15c23d54acbee0e2eaa0452c
 }
