@@ -3,11 +3,6 @@ package server;
 import java.nio.channels.*;
 import java.net.*;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 import java.io.IOException;
 
 public class Server {
@@ -48,7 +43,7 @@ public class Server {
 		}
 
 		// get dispatcher/selector
-		Dispatcher dispatcher = new Dispatcher();
+		Dispatcher dispatcher = new Dispatcher(serverConfig.getNSelectLoops());
 
 		// open server socket channel
 		ServerSocketChannel sch = openServerChannel(serverConfig.getPort());
@@ -59,14 +54,15 @@ public class Server {
 		Acceptor acceptor = new Acceptor(readFactory);
 
 		Thread dispatcherThread;
-		// register the server channel to a selector
 		try {
+			// register the server channel to a selector
 			SelectionKey key = sch.register(dispatcher.selector(), SelectionKey.OP_ACCEPT);
 			key.attach(acceptor);
 
 			// start dispatcher
 			dispatcherThread = new Thread(dispatcher);
 			dispatcherThread.start();
+			
 		} catch (IOException ex) {
 			System.out.println("Cannot register and start server");
 			System.exit(1);

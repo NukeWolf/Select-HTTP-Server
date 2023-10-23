@@ -3,32 +3,13 @@ import java.nio.channels.*;
 import java.io.IOException;
 import java.util.*; // for Set and Iterator and ArrayList
 
-public class Dispatcher implements Runnable {
+public class Worker implements Runnable {
 
-	private Selector selectLoops[];
-	private int currentWorkerSelector;
 	private Selector selector;
 
-	public Dispatcher(int nSelectLoops) {
+	public Worker(Selector s) {
 		// create selector
-		try {
-			selector = Selector.open();
-			selectLoops = new Selector[nSelectLoops];
-			Debug.DEBUG("nSelectLoops: " + selectLoops.length);
-
-			for (int i = 0; i < nSelectLoops; i++) {
-				Selector s = Selector.open();
-				selectLoops[i] = s;
-				Thread workThread = new Thread(new Worker(s));
-				workThread.start();
-			}
-			currentWorkerSelector = 0;
-			
-		} catch (IOException ex) {
-			System.out.println("Cannot create selector.");
-			ex.printStackTrace();
-			System.exit(1);
-		} // end of catch
+    selector = s;
 	} // end of Dispatcher
 
 	public Selector selector() {
@@ -53,7 +34,7 @@ public class Dispatcher implements Runnable {
 	public void run() {
 
 		while (true) {
-			
+			// Debug.DEBUG("Enter selection");
 			try {
 				// check to see if any events
 				selector.select();
@@ -75,14 +56,18 @@ public class Dispatcher implements Runnable {
 				iterator.remove();
 
 				try {
-					if (key.isAcceptable()) { // a new connection is ready to be
-												// accepted
-						IAcceptHandler aH = (IAcceptHandler) key.attachment();
-						aH.handleAccept(key, selectLoops[currentWorkerSelector]);
-						currentWorkerSelector = (currentWorkerSelector+1)%selectLoops.length;
-						Debug.DEBUG("accepted connection -- assigning to worker thread ("+currentWorkerSelector+")");
-					} // end of isAcceptable
+					if (key.isReadable() || key.isWritable()) {
+						IReadWriteHandler rwH = (IReadWriteHandler) key.attachment();
 
+						if (key.isReadable()) {
+							rwH.handleRead(key);
+						} // end of if isReadable
+
+						if (key.isWritable()) {
+							rwH.handleWrite(key);
+						} // end of if isWritable
+					} // end of readwrite
+					
 				} catch (IOException ex) {
 					Debug.DEBUG("Exception when handling key " + key);
 					key.cancel();
@@ -94,7 +79,7 @@ public class Dispatcher implements Runnable {
 				} // end of catch
 
 			} // end of while (iterator.hasNext()) {
-
+				
 		} // end of while (true)
 	} // end of run
 }

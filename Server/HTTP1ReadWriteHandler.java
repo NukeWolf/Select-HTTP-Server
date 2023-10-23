@@ -291,7 +291,6 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		return true;
 	}
 
-
 	private byte[] file_to_bytearr(File f){
 		byte[] arr = new byte[(int)f.length()]; 
 		try{
@@ -369,6 +368,4 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 	} // end of generate response
 
 
-
-	
 }

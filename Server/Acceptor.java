@@ -14,7 +14,7 @@ public class Acceptor implements IAcceptHandler {
 		System.out.println("handleException(): of Acceptor");
 	}
 
-	public void handleAccept(SelectionKey key) throws IOException {
+	public void handleAccept(SelectionKey key, Selector workSelector) throws IOException {
 		ServerSocketChannel server = (ServerSocketChannel) key.channel();
 
 		// extract the ready connection
@@ -33,7 +33,10 @@ public class Acceptor implements IAcceptHandler {
 		IReadWriteHandler rwH = srwf.createHandler();
 		int ops = rwH.getInitOps();
 
-		SelectionKey clientKey = client.register(key.selector(), ops);
+		// to change to master/worker need to register with somthing besides key.selector()
+		workSelector.wakeup();
+		SelectionKey clientKey = client.register(workSelector, ops);
+
 		clientKey.attach(rwH);
 
 	} // end of handleAccept
