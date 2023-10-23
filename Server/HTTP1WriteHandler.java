@@ -3,6 +3,9 @@ package server;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 
@@ -14,6 +17,8 @@ public class HTTP1WriteHandler {
     public boolean sendbody;
     public boolean sendcgi;
 
+    private boolean cgi_headers_sent;
+    private int number_of_returns;
     //States
 	private enum WriteStates { RESPONSE_CREATING, RESPONSE_READY, RESPONSE_SENDING_HEADERS, RESPONSE_SENDING_BODY, 
                                RESPONSE_CREATE_CGI_CHUNK, RESPONSE_SENDING_CGI, RESPONSE_SEND_CGI_TERMINATOR, 
@@ -25,6 +30,8 @@ public class HTTP1WriteHandler {
         outheaders = new HashMap<String,String>();
         sendbody = false;
         sendcgi = false;
+        cgi_headers_sent = false;
+        number_of_returns = 0;
     }
 
     public void resetHandler(){
@@ -32,6 +39,8 @@ public class HTTP1WriteHandler {
         outheaders = new HashMap<String,String>();
         sendbody = false;
         sendcgi = false;
+        cgi_headers_sent = false;
+        number_of_returns = 0;
     }
 
 
@@ -161,22 +170,50 @@ public class HTTP1WriteHandler {
 	public void generateResponseHeaders(ByteBuffer outBuffer, String protocol){
 		String status_line = protocol + " " + response_status_code + " " + response_status_msg + "\r\n";
 		appendStringToByteBuf(outBuffer, status_line);
-		String date_header = "Date: " + OffsetDateTime.now().format(DateTimeFormatter.RFC_1123_DATE_TIME) + "\r\n";
 
+        // Add Date Header
+        String date= OffsetDateTime.now(ZoneId.of("Etc/UTC")).format(DateTimeFormatter.RFC_1123_DATE_TIME);
+		String date_header = "Date: " + date + "\r\n";
 		appendStringToByteBuf(outBuffer, date_header);
 
+        //Add Server Header
+        appendStringToByteBuf(outBuffer, "Server: Yague/1.0 (" + System.getProperty("os.name")+")\r\n");
+
+        //Add remainining headers to be added
 		outheaders.forEach((key,value) -> {
 			appendStringToByteBuf(outBuffer, key + ":" + value + "\r\n");
 		});
-		appendStringToByteBuf(outBuffer, "\r\n");
+		if(sendcgi != true){
+            appendStringToByteBuf(outBuffer, "\r\n");
+        }
 
 		outBuffer.flip();
 	}
 
     public void generateCGIChunk (ByteBuffer outBuffer, byte[] bytes, int length){
-        appendStringToByteBuf(outBuffer, Integer.toHexString(length));
+        int remaining_length = length;
+        // Byte by Byte send all bytes until we get to the end of the headers denoted by \r\n\r\n.
+        if(cgi_headers_sent == false){
+            for (int i = 0; i < length; i++){
+                remaining_length -= 1;
+                outBuffer.put(bytes[i]);
+
+                if (bytes[i] == '\r' || bytes[i] == '\n'){
+                    number_of_returns += 1;
+                }
+                else{
+                    number_of_returns = 0;
+                }
+                if (number_of_returns == 4){
+                    cgi_headers_sent = true;
+                    i = length;
+                }
+            }
+            if (remaining_length == 0) return;
+        }
+        appendStringToByteBuf(outBuffer, Integer.toHexString(remaining_length));
         appendStringToByteBuf(outBuffer, "\r\n");
-        outBuffer.put(bytes,0,length);
+        outBuffer.put(bytes,length - remaining_length,remaining_length);
         appendStringToByteBuf(outBuffer, "\r\n");
         
         outBuffer.flip();
