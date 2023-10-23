@@ -13,7 +13,9 @@ import java.io.*;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.nio.file.Path;
 
@@ -234,7 +236,6 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		inBuffer.clear(); // we do not keep things in the inBuffer
 
 		if (requestHandler.isRequestComplete()) { 
-			//validateRequest();
 			generateResponse(client);
 		}
 	} // end of process input
@@ -253,17 +254,35 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		
 		return arr;
 	}
+	private void validateRequest(){
+		
+	}
 	
 	private void generateResponse(SocketChannel client) {
-		
 		// If Response has already been created, don't run
 		if (!writeHandler.isCreatingResponse()) return;
 
+		
 		String target = requestHandler.target;
 		HashMap<String,String> headers = requestHandler.headers;
+		
+
 
 		//By Default all error messages have no content. Eventually put into a handle exception call.
 		writeHandler.addOutputHeader("Content-Length","0");
+
+		// Verification Methods
+		if (target.contains("../")){
+			writeHandler.setStatusLine("400","Bad Request");
+			return;
+		};
+
+		if (!requestHandler.method.equals("GET") && !requestHandler.method.equals("POST")){
+			writeHandler.setStatusLine("405", "Method \"" + requestHandler.method + "\" not supported");
+			return;
+		}
+
+		
 
 		String Root = "/Users/whyalex/Desktop/Code Projects/CPSC434-HTTP-SERVER/www/example1";
 		File resource = new File(Root + target);
@@ -317,12 +336,16 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 			}
 		}
 		// File Specific Headers
-		LocalDateTime lastModified = LocalDateTime.ofInstant(Instant.ofEpochMilli(resource.lastModified()), 
-                                TimeZone.getDefault().toZoneId()); 
+		LocalDateTime lastModified = LocalDateTime.ofInstant(Instant.ofEpochMilli(resource.lastModified()), ZoneId.of("Etc/UTC")); 
 		OffsetDateTime odt_last_modified = lastModified.atOffset(ZoneOffset.UTC);
 		writeHandler.addOutputHeader("Last-Modified",odt_last_modified.format(DateTimeFormatter.RFC_1123_DATE_TIME));
 
-
+		if(headers.get("If-Modified-Since") != null){
+			LocalDateTime since = LocalDateTime.parse(headers.get("If-Modified-Since"), DateTimeFormatter.RFC_1123_DATE_TIME);
+			if (lastModified.isBefore(since)){
+				writeHandler.setStatusLine("304", "No Change");
+			}
+		}
 
 		
 		// Executable Check
@@ -342,12 +365,32 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 			env.put("REMOTE_ADDR", client.socket().getInetAddress().toString());
 			env.put("REMOTE_HOST",client.socket().getInetAddress().getHostName());
 			env.put("SERVER_PORT", Integer.toString( client.socket().getLocalPort()));
+			env.put("SERVER_NAME",client.socket().getLocalSocketAddress().toString());
+			env.put("SERVER_PROTOCOL",requestHandler.protocol);
+			env.put("SERVER_SOFTWARE","Yague/1.0");
+			if(requestHandler.body != null){
+				env.put("CONTENT_LENGTH", requestHandler.headers.get("Content-Length"));
+				env.put("CONTENT_TYPE", requestHandler.headers.get("Content-Type"));
+			}
+			if(auth != null){
+				env.put("REMOTE_USER",auth.getUser());
+				env.put("AUTH_TYPE",auth.getAuthType());
+			}
+
 			try{
 				cgi = pb.start();
 				writeHandler.setStatusLine("200", "File Found");
 				writeHandler.sendcgi = true;
 				writeHandler.removeOutputHeader("Content-Length");
 				writeHandler.addOutputHeader("Transfer-Encoding", "chunked");
+				if(requestHandler.body != null){
+					cgi.getOutputStream().write(requestHandler.body.getBytes());
+					cgi.getOutputStream().flush();
+					
+				}
+				cgi.getOutputStream().close();
+				
+				
 				//writeHandler.addOutputHeader("Content-Type","text/plain");
 				return;
 			}

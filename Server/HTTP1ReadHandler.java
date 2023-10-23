@@ -25,7 +25,6 @@ public class HTTP1ReadHandler {
 		line_buffer = new StringBuffer(4096);
 		headers = new HashMap<String,String>();
 		currentReadState = ReadStates.REQUEST_METHOD;
-
     }
     public void resetHandler(){
         bodyByteCount = 0;
@@ -51,6 +50,7 @@ public class HTTP1ReadHandler {
 					break;
 				case REQUEST_TARGET:
 					if (ch == ' ') { // Handle a whitespace character
+						Debug.DEBUG("TARGET_LINE" + line_buffer.toString());
 						currentReadState = ReadStates.REQUEST_PROTOCOL;
 						parseTargetLine();
 						line_buffer.setLength(0);
@@ -76,13 +76,15 @@ public class HTTP1ReadHandler {
                         //If two new lines in a row, move on to messge body.
 						if(!parseHeaderLine()){
                             // If there is no Content Length message, assume request is complete.
+							Debug.DEBUG("Clength: " + headers.get("Content-Length"));
 							if(headers.get("Content-Length") == null){
 								currentReadState = ReadStates.REQUEST_COMPLETE;
-
+								body = null;
 							}
 							else{
 								if(headers.get("Content-Length").matches("[0-9]+")){
 									currentReadState = ReadStates.REQUEST_BODY;
+									Debug.DEBUG("Reading Body");
 								}
 								else{
 									handleException();
@@ -96,9 +98,11 @@ public class HTTP1ReadHandler {
 					break;
 				case REQUEST_BODY:
 					int maxbytes = Integer.parseInt(headers.get("Content-Length"));
-					if (bodyByteCount >= maxbytes){
+					if (bodyByteCount >= maxbytes - 1){
 						currentReadState = ReadStates.REQUEST_COMPLETE;
+						line_buffer.append(ch);
 						body = line_buffer.toString();
+						Debug.DEBUG("Body:" + body);
 					}
 					else{
 						line_buffer.append(ch);
