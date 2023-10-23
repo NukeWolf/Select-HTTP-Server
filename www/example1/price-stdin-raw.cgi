@@ -21,9 +21,9 @@ print "</pre>";
 
 print "<p>Debug: STDIN:";
 print "<pre>";
-# foreach my $line ( <STDIN> ) {
-#     chomp( $line );
-#     print "$line\n";
-# }
+foreach my $line ( <STDIN> ) {
+    chomp( $line );
+    print "$line\n";
+}
 print "</pre>";
 print "</html>";
