@@ -77,6 +77,7 @@ public class Worker implements Runnable {
 
 				} 
 				catch (CancelledKeyException ex) {
+					// not actually an issue, 
 				}
 				catch (IOException ex) {
 					Debug.DEBUG("IOException when handling key " + key);

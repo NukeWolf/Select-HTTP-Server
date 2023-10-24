@@ -26,16 +26,16 @@ public class UnusedChannelMonitor implements Runnable {
         try {
           Instant accepted = unusedChannelTable.get(channel);
           long timeSinceAcceptance = Duration.between(accepted, Instant.now()).getSeconds();
-          
+
           if (timeSinceAcceptance >= 3) {
-            Debug.DEBUG("Closing unused channel");
+            Debug.DEBUG("Closing unused channel:" + channel);
             channel.close();
             unusedChannelTable.remove(channel);
           }
         } catch (NullPointerException ex) {
           Debug.DEBUG("Channel received request");
         } catch (IOException ex) {
-          System.out.println("Error closing unused channel: " + channel);
+          System.out.println("IOException closing channel: " + channel);
           ex.printStackTrace();
         }
       } // end of while iterator.hasNext()

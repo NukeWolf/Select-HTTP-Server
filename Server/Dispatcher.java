@@ -109,7 +109,7 @@ public class Dispatcher implements Runnable {
 					}
 				} // end try-catch
 			} // end iterator.hasNext()
-			Debug.DEBUG("Processed all accept events");
+			Debug.DEBUG("Finished accept loop");
 
 			// // add a command queue
 			while (!commandQueue.isEmpty()) {
@@ -135,7 +135,7 @@ public class Dispatcher implements Runnable {
 
 		shutdown = true;
 		sch.close();
-		connectionSelector.wakeup();
+		connectionSelector.wakeup(); // unblock
 		return;
 	}
 
