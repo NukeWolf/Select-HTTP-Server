@@ -1,6 +1,7 @@
 package server;
 
 import java.nio.channels.*;
+import java.util.Scanner;
 import java.net.*;
 
 import java.io.IOException;
@@ -42,32 +43,38 @@ public class Server {
 			serverConfig.parseConfigurationFile(args[1]);
 		}
 
-		// get dispatcher/selector
-		Dispatcher dispatcher = new Dispatcher(serverConfig.getNSelectLoops());
-
 		// open server socket channel
 		ServerSocketChannel sch = openServerChannel(serverConfig.getPort());
 
-		// create server acceptor for Echo Line ReadWrite Handler
-		// ISocketReadWriteHandlerFactory echoFactory = new EchoLineReadWriteHandlerFactory();
+		// get dispatcher/selector
+		Dispatcher dispatcher = new Dispatcher(sch, serverConfig.getNSelectLoops());
+
+		// create server acceptor
 		ISocketReadWriteHandlerFactory readFactory = new HTTP1ReadWriteHandlerFactory();
 		Acceptor acceptor = new Acceptor(readFactory);
 
-		Thread dispatcherThread;
-		try {
-			// register the server channel to a selector
-			SelectionKey key = sch.register(dispatcher.selector(), SelectionKey.OP_ACCEPT);
-			key.attach(acceptor);
-
-			// start dispatcher
-			dispatcherThread = new Thread(dispatcher);
-			dispatcherThread.start();
-			
-		} catch (IOException ex) {
-			System.out.println("Cannot register and start server");
-			System.exit(1);
-		}
+		Thread dispatcherThread = new Thread(dispatcher);
+		dispatcherThread.start();
 		// may need to join the dispatcher thread
+
+		try(Scanner scanner = new Scanner(System.in)) {
+			while(true) {
+				System.out.print("server> ");
+				String line = scanner.nextLine().trim();
+				if (line.equals("SHUTDOWN")) {
+					System.out.println("Shutting down");
+					try {
+						dispatcher.gracefulShutdown();
+					}
+					catch (IOException ex) {
+						System.out.println("Error shutting down");
+						ex.printStackTrace();
+						System.exit(1);
+					}
+					return;
+				}
+			}
+		}
 
 	} // end of main
 
