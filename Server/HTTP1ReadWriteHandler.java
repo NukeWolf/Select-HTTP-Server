@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.TimeZone;
 import java.io.*;
+import java.net.URLConnection;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
@@ -17,6 +18,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 public class HTTP1ReadWriteHandler implements IReadWriteHandler {
@@ -55,8 +57,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 	}
 	private void close_socket(SelectionKey key){
 		try{
-			ServerSocketChannel client = (ServerSocketChannel) key.channel();
-			client.close();
+			key.channel().close();
 			key.cancel();
 			channelClosed = true; 
 			return;
@@ -100,8 +101,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 
 	private void updateSelectorState(SelectionKey key) throws IOException {
 
-		if (channelClosed)
-			return;
+		if (channelClosed) return;
 		
 
 		// Keep-Connection Alive or not.
@@ -176,6 +176,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 			int bytesToRead = scriptOutput.available();
 			Debug.DEBUG("Bytes Predicted: " + bytesToRead);
 			Debug.DEBUG("Is process running:" + cgi.isAlive());
+
 			// If nothing left in the stream and the process has terminated.
 			if(!cgi.isAlive() && bytesToRead == 0){
 				outBuffer.clear();
@@ -187,7 +188,6 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 					Debug.DEBUG("No Bytes ready from output");
 					return;
 				}
-
 				byte b[] = new byte[bytesToRead];
 				int bytesRead = scriptOutput.read(b);
 				Debug.DEBUG("CGI Chunk length: " + bytesRead);
@@ -221,8 +221,9 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		Debug.DEBUG("handleRead: Read data from connection " + client + " for " + readBytes + " byte(s); to buffer "
 		+ inBuffer);
 
-		// If no bytes to read. TODO: Not sure if right as a request ends in a CRLF.
+		// -1 for an end of stream
 		if (readBytes == -1) { 
+			close_socket(key);
 			return;
 		} 
 		inBuffer.flip(); // read input
@@ -270,6 +271,12 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 
 		//By Default all error messages have no content. Eventually put into a handle exception call.
 		writeHandler.addOutputHeader("Content-Length","0");
+		if (requestHandler.willKeepAlive()){
+			writeHandler.addOutputHeader("Connection", "Keep-Alive");
+		}
+		else{
+			writeHandler.addOutputHeader("Connection", "close");
+		}
 
 		// Verification Methods
 		if (target.contains("../")){
@@ -336,14 +343,18 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 			}
 		}
 		// File Specific Headers
-		LocalDateTime lastModified = LocalDateTime.ofInstant(Instant.ofEpochMilli(resource.lastModified()), ZoneId.of("Etc/UTC")); 
+		LocalDateTime lastModified = LocalDateTime.ofInstant(Instant.ofEpochMilli(resource.lastModified()), ZoneId.of("Etc/UTC"));
+		ZonedDateTime lastModifiedZoned = ZonedDateTime.ofInstant(Instant.ofEpochMilli(resource.lastModified()), ZoneId.of("Etc/UTC")); 
 		OffsetDateTime odt_last_modified = lastModified.atOffset(ZoneOffset.UTC);
 		writeHandler.addOutputHeader("Last-Modified",odt_last_modified.format(DateTimeFormatter.RFC_1123_DATE_TIME));
 
 		if(headers.get("If-Modified-Since") != null){
+			Debug.DEBUG("Modfied-Since:" + headers.get("If-Modified-Since"));
+			// ZonedDateTime since = ZonedDateTime.parse(headers.get("If-Modified-Since"), DateTimeFormatter.RFC_1123_DATE_TIME);
 			LocalDateTime since = LocalDateTime.parse(headers.get("If-Modified-Since"), DateTimeFormatter.RFC_1123_DATE_TIME);
-			if (lastModified.isBefore(since)){
+			if (lastModified.isBefore(since) || lastModified.isEqual(since)){
 				writeHandler.setStatusLine("304", "No Change");
+				return;
 			}
 		}
 
@@ -413,6 +424,19 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 			writeHandler.setStatusLine("403", "Can't read resource");
 			return;
 		}
+
+		try{
+			String mimeType= URLConnection.guessContentTypeFromName(resource.getName());
+			if (mimeType != null){
+				writeHandler.addOutputHeader("Content-Type", mimeType);
+			}
+		}
+		catch (Exception e){
+			writeHandler.setStatusLine("500", "Server Error");
+			return;
+		}
+
+		
 		writeHandler.addOutputHeader("Content-Length",Long.toString(resource.length()));
 		writeHandler.setStatusLine("200", "File Found");
 		writeHandler.sendbody = true;

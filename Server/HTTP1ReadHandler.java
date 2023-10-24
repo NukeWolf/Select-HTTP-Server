@@ -28,7 +28,7 @@ public class HTTP1ReadHandler {
     }
     public void resetHandler(){
         bodyByteCount = 0;
-		line_buffer = new StringBuffer(4096);
+		line_buffer.setLength(0);
 		headers = new HashMap<String,String>();
 		currentReadState = ReadStates.REQUEST_METHOD;
     }

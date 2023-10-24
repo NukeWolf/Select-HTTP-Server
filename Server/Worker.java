@@ -5,6 +5,9 @@ import java.io.IOException;
 import java.util.*; // for Set and Iterator and ArrayList
 import java.util.concurrent.ConcurrentLinkedQueue;
 
+import server.HTTP1ReadHandler;
+import server.HTTP1ReadWriteHandler;
+
 public class Worker implements Runnable {
 
 	private ConcurrentLinkedQueue<SocketChannel> clientSocketQueue;
@@ -36,8 +39,9 @@ public class Worker implements Runnable {
 				// try to add new connection
 				SocketChannel cch = clientSocketQueue.poll();
 				if (cch != null) {
-					SelectionKey key = cch.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE);
-					key.attach(new HTTP1ReadWriteHandler());
+					HTTP1ReadWriteHandler handler= new HTTP1ReadWriteHandler();
+					SelectionKey key = cch.register(selector, handler.getInitOps());
+					key.attach(handler);
 				}
 				// check to see if any events
 				selector.select(); // better way to do this?
@@ -66,7 +70,7 @@ public class Worker implements Runnable {
 							rwH.handleRead(key);
 						} // end of if isReadable
 
-						if (key.isWritable()) {
+						if (key.isValid() && key.isWritable()) {
 							rwH.handleWrite(key);
 						} // end of if isWritable
 					} // end of readwrite
@@ -81,7 +85,7 @@ public class Worker implements Runnable {
 					}
 				} // end of catch
 			} // end of while (iterator.hasNext()) {
-
+			
 			if (shutdown) {
 				Debug.DEBUG("Shutting down worker");
 				break;
