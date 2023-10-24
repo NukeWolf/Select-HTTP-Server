@@ -1,8 +1,10 @@
 package server;
 
 import java.nio.channels.*;
+import java.time.Instant;
 import java.io.IOException;
 import java.util.*; // for Set and Iterator and ArrayList
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 import server.HTTP1ReadHandler;
@@ -11,13 +13,15 @@ import server.HTTP1ReadWriteHandler;
 public class Worker implements Runnable {
 
 	private ConcurrentLinkedQueue<SocketChannel> clientSocketQueue;
+	private ConcurrentHashMap<SocketChannel, Instant> unusedChannelTable;
 
 	private Selector selector;
 
 	private boolean shutdown;
 
-	public Worker(ConcurrentLinkedQueue<SocketChannel> clientSocketQueue) {
-		this.clientSocketQueue = clientSocketQueue;
+	public Worker(ConcurrentLinkedQueue<SocketChannel> cSQ, ConcurrentHashMap<SocketChannel, Instant> uCT) {
+		clientSocketQueue = cSQ;
+		unusedChannelTable = uCT;
 		try {
 			selector = Selector.open();
 		} catch (IOException ex) {
@@ -34,17 +38,16 @@ public class Worker implements Runnable {
 
 	public void run() {
 
-		while (true) {
+		while (!shutdown) {
 			try {
-				// try to add new connection
+				// check for new channels to add to this worker
 				SocketChannel cch = clientSocketQueue.poll();
 				if (cch != null) {
 					HTTP1ReadWriteHandler handler= new HTTP1ReadWriteHandler();
 					SelectionKey key = cch.register(selector, handler.getInitOps());
 					key.attach(handler);
 				}
-				// check to see if any events
-				selector.select(); // better way to do this?
+				selector.select(); 
 			} catch (IOException ex) {
 				ex.printStackTrace();
 				break;
@@ -71,28 +74,27 @@ public class Worker implements Runnable {
 						} // end of if isReadable
 
 						if (key.isValid() && key.isWritable()) {
+							unusedChannelTable.remove(key.channel());
 							rwH.handleWrite(key);
 						} // end of if isWritable
 					} // end of readwrite
 
-				} catch (IOException ex) {
-					Debug.DEBUG("Exception when handling key " + key);
+				} 
+				catch (CancelledKeyException ex) {
+				}
+				catch (IOException ex) {
+					Debug.DEBUG("IOException when handling key " + key);
 					key.cancel();
 					try {
 						key.channel().close();
-						// in a more general design, call have a handleException
 					} catch (IOException cex) {
+						System.out.println("Failed to close problematic channel on read-write");
 					}
 				} // end of catch
-			} // end of while (iterator.hasNext()) {
-			
-			if (shutdown) {
-				Debug.DEBUG("Shutting down worker");
-				break;
-			}
+			} // end of while (iterator.hasNext())
 
 		} // end of while (true)
-		Debug.DEBUG("Finished run");
+		// Debug.DEBUG("Finished worker run");
 	} // end of run
 
 	public void shutdown() {
