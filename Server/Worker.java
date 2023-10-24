@@ -33,14 +33,13 @@ public class Worker implements Runnable {
 
 		while (true) {
 			try {
-				// try to add new connection
+				// check for new channels to add to this worker
 				SocketChannel cch = clientSocketQueue.poll();
 				if (cch != null) {
 					SelectionKey key = cch.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE);
 					key.attach(new HTTP1ReadWriteHandler());
 				}
-				// check to see if any events
-				selector.select(); // better way to do this?
+				selector.select(); 
 			} catch (IOException ex) {
 				ex.printStackTrace();
 				break;
@@ -76,8 +75,8 @@ public class Worker implements Runnable {
 					key.cancel();
 					try {
 						key.channel().close();
-						// in a more general design, call have a handleException
 					} catch (IOException cex) {
+						System.out.println("Failed to close problematic channel on read-write");
 					}
 				} // end of catch
 			} // end of while (iterator.hasNext()) {
@@ -88,7 +87,7 @@ public class Worker implements Runnable {
 			}
 
 		} // end of while (true)
-		Debug.DEBUG("Finished run");
+		Debug.DEBUG("Finished worker run");
 	} // end of run
 
 	public void shutdown() {
