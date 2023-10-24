@@ -1,65 +1,59 @@
 package server;
+
 import java.nio.channels.*;
 import java.io.IOException;
 import java.util.*; // for Set and Iterator and ArrayList
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class Worker implements Runnable {
 
+	private ConcurrentLinkedQueue<SocketChannel> clientSocketQueue;
+
 	private Selector selector;
 
-	public Worker(Selector s) {
-		// create selector
-    selector = s;
-	} // end of Dispatcher
+	private boolean shutdown;
 
-	public Selector selector() {
+	public Worker(ConcurrentLinkedQueue<SocketChannel> clientSocketQueue) {
+		this.clientSocketQueue = clientSocketQueue;
+		try {
+			selector = Selector.open();
+		} catch (IOException ex) {
+			System.out.println("Cannot create selector for worker");
+			ex.printStackTrace();
+			System.exit(1);
+		}
+		shutdown = false;
+	}
+
+	public Selector getSelector() {
 		return selector;
 	}
-	/*
-	 * public SelectionKey registerNewSelection(SelectableChannel channel,
-	 * IChannelHandler handler, int ops) throws ClosedChannelException {
-	 * SelectionKey key = channel.register(selector, ops); key.attach(handler);
-	 * return key; } // end of registerNewChannel
-	 * 
-	 * public SelectionKey keyFor(SelectableChannel channel) { return
-	 * channel.keyFor(selector); }
-	 * 
-	 * public void deregisterSelection(SelectionKey key) throws IOException {
-	 * key.cancel(); }
-	 * 
-	 * public void updateInterests(SelectionKey sk, int newOps) {
-	 * sk.interestOps(newOps); }
-	 */
 
-		// need these debug statements to run correctly for some reason????
 	public void run() {
 
 		while (true) {
-			// Debug.DEBUG("Enter selection");
 			try {
+				// try to add new connection
+				SocketChannel cch = clientSocketQueue.poll();
+				if (cch != null) {
+					SelectionKey key = cch.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE);
+					key.attach(new HTTP1ReadWriteHandler());
+				}
 				// check to see if any events
-				selector.select();
+				selector.select(); // better way to do this?
 			} catch (IOException ex) {
 				ex.printStackTrace();
 				break;
 			}
 
-							Debug.DEBUG("worker 1");
 			// readKeys is a set of ready events
 			Set<SelectionKey> readyKeys = selector.selectedKeys();
-
-
-							Debug.DEBUG("worker 2");
 
 			// create an iterator for the set
 			Iterator<SelectionKey> iterator = readyKeys.iterator();
 
-
-							Debug.DEBUG("worker 3");
-
-			// iterate over all events
+			// iterate over all events (replace with for-each?)
 			while (iterator.hasNext()) {
-							Debug.DEBUG("worker 4");
 
 				SelectionKey key = (SelectionKey) iterator.next();
 				iterator.remove();
@@ -76,7 +70,7 @@ public class Worker implements Runnable {
 							rwH.handleWrite(key);
 						} // end of if isWritable
 					} // end of readwrite
-					
+
 				} catch (IOException ex) {
 					Debug.DEBUG("Exception when handling key " + key);
 					key.cancel();
@@ -86,11 +80,18 @@ public class Worker implements Runnable {
 					} catch (IOException cex) {
 					}
 				} // end of catch
-
 			} // end of while (iterator.hasNext()) {
-							Debug.DEBUG("worker 5");
-				
+
+			if (shutdown) {
+				Debug.DEBUG("Shutting down worker");
+				break;
+			}
+
 		} // end of while (true)
-							Debug.DEBUG("worker 6");
+		Debug.DEBUG("Finished run");
 	} // end of run
+
+	public void shutdown() {
+		shutdown = true;
+	}
 }
