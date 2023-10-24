@@ -121,15 +121,29 @@ public class HTTP1ReadHandler {
 		if (s.length() == 0){
 			return false;
 		}
-		String[] headerInfo = s.split(":");
-		if (headerInfo.length < 2){
-			handleException();
-			return false;
-		}
-		String fieldName = headerInfo[0];
-		String fieldValue = headerInfo[1].trim();
-		headers.put(fieldName,fieldValue);
-		return true;
+
+		String matchregex = "([\\w-]+):\\s*(.+)\\s*";
+        Pattern pattern = Pattern.compile(matchregex);
+        Matcher matcher = pattern.matcher(line_buffer.toString());
+		try{
+            matcher.find();
+			String fieldName = matcher.group(1);
+			String fieldValue = matcher.group(2);
+
+            if (fieldValue == null){
+                handleException();
+				return true;
+            }
+			headers.put(fieldName,fieldValue);
+			return true;
+        }
+        catch (Exception e){
+            handleException();
+            e.printStackTrace();
+			return true;
+        }
+		
+		
 	}
     //Seperates the query string
     private void parseTargetLine(){
@@ -165,7 +179,7 @@ public class HTTP1ReadHandler {
 
     public boolean willKeepAlive(){
         //By Default Keep Alive
-        return headers.get("Connection") == null || headers.get("Connection").equals("keep-alive");
+        return headers.get("Connection") == null || headers.get("Connection").toLowerCase().equals("keep-alive");
     }
 
     public void handleException(){
