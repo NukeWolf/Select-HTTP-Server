@@ -85,18 +85,18 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 
 	public void handleRead(SelectionKey key) throws IOException {
 
-		if (readHandler.isRequestComplete()) { // this call should not happen, ignore
+		if (readHandler.isRequestComplete()) {
 			return;
 		}
 		// process data
 		processInBuffer(key);
 
 		// update state
-		updateSelectorState(key);
+		updateConnectionState(key);
 
 	} // end of handleRead
 
-	private void updateSelectorState(SelectionKey key) throws IOException {
+	private void updateConnectionState(SelectionKey key) throws IOException {
 
 		if (channelClosed)
 			return;
@@ -199,7 +199,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		}
 
 		// update state
-		updateSelectorState(key);
+		updateConnectionState(key);
 
 		// try {Thread.sleep(5000);} catch (InterruptedException e) {}
 		Debug.DEBUG("handleWrite->");
@@ -214,8 +214,11 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		Debug.DEBUG("handleRead: Read data from connection " + client + " for " + readBytes + " byte(s); to buffer "
 				+ inBuffer);
 
-		// If no bytes to read. TODO: Not sure if right as a request ends in a CRLF.
+		// close connection
 		if (readBytes == -1) {
+			key.cancel();
+			key.channel().close();
+			channelClosed = true;
 			return;
 		}
 		inBuffer.flip(); // read input
@@ -267,14 +270,13 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 			writeHandler.setStatusLine("400", "Bad Request");
 			return;
 		}
-		;
 
 		if (!readHandler.method.equals("GET") && !readHandler.method.equals("POST")) {
 			writeHandler.setStatusLine("405", "Method \"" + readHandler.method + "\" not supported");
 			return;
 		}
 
-		String Root = "/Users/whyalex/Desktop/Code Projects/CPSC434-HTTP-SERVER/www/example1";
+		String Root = "/Users/michaeltu/Desktop/23_Fall/cs_434/Select-HTTP-Server/www/example1";
 		File resource = new File(Root + target);
 
 		// Mobile Content Check
