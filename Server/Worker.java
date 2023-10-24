@@ -7,6 +7,9 @@ import java.util.*; // for Set and Iterator and ArrayList
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
+import server.HTTP1ReadHandler;
+import server.HTTP1ReadWriteHandler;
+
 public class Worker implements Runnable {
 
 	private ConcurrentLinkedQueue<SocketChannel> clientSocketQueue;
@@ -40,8 +43,9 @@ public class Worker implements Runnable {
 				// check for new channels to add to this worker
 				SocketChannel cch = clientSocketQueue.poll();
 				if (cch != null) {
-					SelectionKey key = cch.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE);
-					key.attach(new HTTP1ReadWriteHandler());
+					HTTP1ReadWriteHandler handler= new HTTP1ReadWriteHandler();
+					SelectionKey key = cch.register(selector, handler.getInitOps());
+					key.attach(handler);
 				}
 				selector.select(); 
 			} catch (IOException ex) {
@@ -69,7 +73,7 @@ public class Worker implements Runnable {
 							rwH.handleRead(key);
 						} // end of if isReadable
 
-						if (key.isWritable()) {
+						if (key.isValid() && key.isWritable()) {
 							unusedChannelTable.remove(key.channel());
 							rwH.handleWrite(key);
 						} // end of if isWritable

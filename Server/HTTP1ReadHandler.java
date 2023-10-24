@@ -29,12 +29,11 @@ public class HTTP1ReadHandler {
 		line_buffer = new StringBuffer(4096);
 		headers = new HashMap<String, String>();
 		currentReadState = ReadStates.REQUEST_METHOD;
-	}
-
-	public void resetHandler() {
-		bodyByteCount = 0;
-		line_buffer = new StringBuffer(4096);
-		headers = new HashMap<String, String>();
+    }
+    public void resetHandler(){
+        bodyByteCount = 0;
+		line_buffer.setLength(0);
+		headers = new HashMap<String,String>();
 		currentReadState = ReadStates.REQUEST_METHOD;
 	}
 
@@ -133,54 +132,70 @@ public class HTTP1ReadHandler {
 		if (s.length() == 0) {
 			return false;
 		}
-		String[] headerInfo = s.split(":");
-		if (headerInfo.length < 2) {
-			handleException();
-			return false;
-		}
-		String fieldName = headerInfo[0];
-		String fieldValue = headerInfo[1].trim();
-		headers.put(fieldName, fieldValue);
-		return true;
-	}
+		String matchregex = "([\\w-]+):\\s*(.+)\\s*";
+        Pattern pattern = Pattern.compile(matchregex);
+        Matcher matcher = pattern.matcher(line_buffer.toString());
+		try{
+            matcher.find();
+			String fieldName = matcher.group(1);
+			String fieldValue = matcher.group(2);
 
-	// Seperates the query string
-	private void parseTargetLine() {
-		String matchregex = "([\\/\\\\a-zA-Z0-9\\.-]+)(\\?.+)?";
-		Pattern pattern = Pattern.compile(matchregex);
-		Matcher matcher = pattern.matcher(line_buffer.toString());
-		try {
-			matcher.find();
-			target = matcher.group(1);
-			query_string = matcher.group(2);
-			if (query_string == null) {
-				query_string = "";
-			} else {
-				query_string = query_string.substring(1);
-			}
-		} catch (Exception e) {
-			handleException();
-			e.printStackTrace();
-		}
-
+            if (fieldValue == null){
+                handleException();
+				return true;
+            }
+			headers.put(fieldName,fieldValue);
+			return true;
+        }
+        catch (Exception e){
+            handleException();
+            e.printStackTrace();
+			return true;
+        }
+		
+		
 	}
+    //Seperates the query string
+    private void parseTargetLine(){
+        String matchregex = "([\\/\\\\a-zA-Z0-9\\.-]+)(\\?.+)?";
+        Pattern pattern = Pattern.compile(matchregex);
+        Matcher matcher = pattern.matcher(line_buffer.toString());
+        try{
+            matcher.find();
+            target = matcher.group(1);
+            query_string = matcher.group(2);
+            if (query_string == null){
+                query_string = "";
+            }
+            else{
+                query_string = query_string.substring(1);
+            }
+        }
+        catch (Exception e){
+            handleException();
+            e.printStackTrace();
+        }
+        
 
-	public boolean isRequestComplete() {
-		return (currentReadState == ReadStates.REQUEST_COMPLETE || currentReadState == ReadStates.REQUEST_PARSE_ERROR);
-	}
+    }
 
-	public boolean isRequestError() {
-		return currentReadState == ReadStates.REQUEST_PARSE_ERROR;
-	}
+    public boolean isRequestComplete(){
+        return (currentReadState == ReadStates.REQUEST_COMPLETE || currentReadState == ReadStates.REQUEST_PARSE_ERROR);
+    }
 
-	public boolean willKeepAlive() {
-		// By Default Keep Alive
-		return headers.get("Connection") == null || headers.get("Connection").equals("keep-alive");
-	}
+    public boolean isRequestError(){
+        return currentReadState == ReadStates.REQUEST_PARSE_ERROR;
+    }
 
-	public void handleException() {
-		currentReadState = ReadStates.REQUEST_PARSE_ERROR;
-		return;
-	}
+    public boolean willKeepAlive(){
+        //By Default Keep Alive
+        return headers.get("Connection") == null || headers.get("Connection").toLowerCase().equals("keep-alive");
+    }
+
+    public void handleException(){
+        currentReadState = ReadStates.REQUEST_PARSE_ERROR;
+        return;
+    }
+    
 
 }
