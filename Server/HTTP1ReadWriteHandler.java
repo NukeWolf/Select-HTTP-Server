@@ -1,14 +1,15 @@
-package server;
-
-import server.Htaccess;
-import server.HTTP1ReadHandler;
-import server.HTTP1WriteHandler;
+package Server;
 
 import java.nio.*;
 import java.nio.channels.*;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.TimeZone;
+
+import Server.HTTP1ReadHandler;
+import Server.HTTP1WriteHandler;
+import Server.Htaccess;
+
 import java.io.*;
 import java.net.URLConnection;
 import java.time.Instant;

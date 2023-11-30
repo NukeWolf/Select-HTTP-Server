@@ -1,4 +1,4 @@
-package server;
+package Server;
 
 import java.nio.channels.*;
 import java.time.Instant;
@@ -7,8 +7,8 @@ import java.util.*; // for Set and Iterator and ArrayList
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
-import server.HTTP1ReadHandler;
-import server.HTTP1ReadWriteHandler;
+import Server.HTTP1ReadHandler;
+import Server.HTTP1ReadWriteHandler;
 
 public class Worker implements Runnable {
 
