@@ -38,7 +38,7 @@ public class Server {
 	public static void main(String[] args) {
 
 		// configure server
-		serverConfig = new ServerConfig();
+		serverConfig = ServerConfig.getInstance();
 		if (args.length == 2) {
 			serverConfig.parseConfigurationFile(args[1]);
 		}
@@ -50,8 +50,8 @@ public class Server {
 		Dispatcher dispatcher = new Dispatcher(sch, serverConfig.getNSelectLoops());
 
 		// create server acceptor
-		ISocketReadWriteHandlerFactory readFactory = new HTTP1ReadWriteHandlerFactory();
-		Acceptor acceptor = new Acceptor(readFactory);
+		// ISocketReadWriteHandlerFactory readFactory = new HTTP1ReadWriteHandlerFactory();
+		// Acceptor acceptor = new Acceptor(readFactory);
 
 		Thread dispatcherThread = new Thread(dispatcher);
 		dispatcherThread.start();
