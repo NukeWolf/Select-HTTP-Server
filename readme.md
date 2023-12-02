@@ -1,3 +1,5 @@
+## Team Members: Alex Huang, Michael Tu
+
 # Design
 
 ## Server Structure
