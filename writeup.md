@@ -33,12 +33,14 @@ The key difference between `ByteBuffer` and `ByteBuf` is that `ByteBuf` maintain
 
 ## nginx is currently the most-widely used HTTP server. Please read nginx source code, and developer guide to answer the following questions. You can use the developer guide but need to add reference to the source code.
 
-### Although nginx has both Master and Worker, the design is the symmetric design that we covered in class: multiple Workers compete on the shared welcome socket (accept). One issue about the design we said in class is that this design does not offer flexible control such as load balance. Please describe how nginx introduces mechanisms to allow certain load balancing among workers? Related with the shared accept, one issue is that when a new connection becomes acceptable, multiple workers can be notified, creating contention. Please read nginx event loop and describe how nginx tries to resolve the contention.
+### Although nginx has both Master and Worker, the design is the symmetric design that we covered in class: multiple Workers compete on the shared welcome socket (accept). One issue about the design we said in class is that this design does not offer flexible control such as load balance. Please describe how nginx introduces mechanisms to allow certain load balancing among workers. Related with the shared accept, one issue is that when a new connection becomes acceptable, multiple workers can be notified, creating contention. Please read nginx event loop and describe how nginx tries to resolve the contention.
+
+Nginx tries to resolve contention and load balancing through the use of `ngx_use_accept_mutex`. Workers will only accept connections when they have possession of the mutex. This way, only one thread at a time can accept new connections.
 
 
 ### The nginx event loop processes both io events and timers. If it were nginx, how would you implement the 3-second timeout requirement of this project?
 
-To implement the 3-second timeout requirement, I would add a timer event with an event handler that closes the connection. This is because the nginx event loop begins its processing by finding the timer which is closest to expiring.
+To implement the 3-second timeout requirement, I would add a timer event with an event handler that closes the connection. This is because the nginx event loop begins its processing by finding the timer which is closest to expiring. (first `ngx_process_events_and_timers` which calls `ngx_event_expire_timers`) For timers that have expired, nginx calls the correct handler. Since our handler closes the connection, this means nginx will close the connection. 
 
 ### nginx processes HTTP in 11 phases. What are the phases? Please list the checker functions of each phase.
 
