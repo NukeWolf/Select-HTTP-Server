@@ -10,6 +10,8 @@ import java.util.Hashtable;
 
 public class ServerConfig {
 
+  private static ServerConfig server_config_instance = null;
+
   private static final int DEFAULT_PORT = 6789;
   private static final int DEFAULT_NSELECTLOOPS = 2;
 
@@ -26,14 +28,23 @@ public class ServerConfig {
   public int port;
   public int nSelectLoops;
   public Hashtable<String, String> vHostNameToRoot;
-
+  private String DEFAULT_ROOT = null;
   private enum ParseStates{GLOBAL, SCOPED}
 
-  public ServerConfig() {
+  private ServerConfig() {
     port = DEFAULT_PORT;
     nSelectLoops = DEFAULT_NSELECTLOOPS;
     vHostNameToRoot = new Hashtable<>();
   }
+
+  public static synchronized ServerConfig getInstance()
+  {
+      if (server_config_instance == null)
+          server_config_instance = new ServerConfig();
+
+      return server_config_instance;
+  }
+  
 
   public int getPort() {
     return port;
@@ -45,6 +56,10 @@ public class ServerConfig {
 
   public Hashtable<String, String> getVHostRoots() {
     return vHostNameToRoot;
+  }
+
+  public String getDefaultRoot(){
+    return DEFAULT_ROOT;
   }
 
 	public void parseConfigurationFile(String confFileName) {
@@ -64,7 +79,10 @@ public class ServerConfig {
         }
         else if (parseState == ParseStates.SCOPED && sectionCloseMatcher.reset(line).find()) {
           parseState = ParseStates.GLOBAL;
-          vHostNameToRoot.put(documentRoot, serverName);
+          vHostNameToRoot.put(serverName, documentRoot);
+          if (DEFAULT_ROOT == null){
+            DEFAULT_ROOT = documentRoot;
+          }
         }
         else if (directiveMatcher.reset(line).find()) {
           String name = directiveMatcher.group(1);

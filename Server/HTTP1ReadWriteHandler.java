@@ -4,11 +4,7 @@ import java.nio.*;
 import java.nio.channels.*;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.TimeZone;
 
-import Server.HTTP1ReadHandler;
-import Server.HTTP1WriteHandler;
-import Server.Htaccess;
 
 import java.io.*;
 import java.net.URLConnection;
@@ -19,11 +15,10 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.nio.file.Files;
 import java.nio.file.Path;
 
 public class HTTP1ReadWriteHandler implements IReadWriteHandler {
-
+	
 	// Sockets
 	private ByteBuffer inBuffer;
 	private ByteBuffer outBuffer;
@@ -275,26 +270,45 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 			return;
 		}
 
+		//Verify Method
 		if (!readHandler.method.equals("GET") && !readHandler.method.equals("POST")) {
 			writeHandler.setStatusLine("405", "Method \"" + readHandler.method + "\" not supported");
 			return;
 		}
 
-		String Root = "/Users/michaeltu/Desktop/23_Fall/cs_434/Select-HTTP-Server/www/example1";
-		File resource = new File(Root + target);
+		// Root Selection
+		String host = headers.get("Host");
+		String Root;
+		ServerConfig config = ServerConfig.getInstance();
 
+		if (host != null && config.getVHostRoots().get(host) != null){
+			Root = config.getVHostRoots().get(host);
+		}
+		else {
+			Root = config.getDefaultRoot();
+		}
+		
+		
+		//"/Users/whyalex/Desktop/Code Projects/CPSC434-HTTP-SERVER/www/example1";
+
+
+		// File Selection
+		File resource = new File(Root + target);
 		// Mobile Content Check
-		if (target == "/") {
+		if (target.equals("/")) {
 			String device = readHandler.headers.get("User-Agent");
-			if (device.matches("iPhone|Mobile")) {
+			if (device != null && device.matches("(.*)(iPhone|Mobile)(.*)")) {
+				Debug.DEBUG("is_mobile");
 				resource = new File(Root + "/index_m.html");
+				if (!resource.exists()){
+					resource = new File(Root + "/index.html");
+				}
 			} else {
 				resource = new File(Root + "/index.html");
 			}
 		}
-
 		// Directory Check and change to index.html
-		if (resource.isDirectory()) {
+		else if (resource.isDirectory()) {
 			Debug.DEBUG("Looking for Index.html");
 			resource = new File(Root + target + "index.html");
 		}
@@ -328,6 +342,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 				return;
 			}
 		}
+		
 		// File Specific Headers
 		LocalDateTime lastModified = LocalDateTime.ofInstant(Instant.ofEpochMilli(resource.lastModified()), ZoneId.of("Etc/UTC"));
 		ZonedDateTime lastModifiedZoned = ZonedDateTime.ofInstant(Instant.ofEpochMilli(resource.lastModified()), ZoneId.of("Etc/UTC")); 

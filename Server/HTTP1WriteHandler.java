@@ -170,7 +170,7 @@ public class HTTP1WriteHandler {
     }
 
     public void generateResponseHeaders(ByteBuffer outBuffer, String protocol) {
-        String status_line = protocol + " " + response_status_code + " " + response_status_msg + "\r\n";
+        String status_line = "HTTP/1.1" + " " + response_status_code + " " + response_status_msg + "\r\n";
         appendStringToByteBuf(outBuffer, status_line);
 
         // Add Date Header
