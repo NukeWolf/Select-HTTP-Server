@@ -157,7 +157,7 @@ public class HTTP1ReadHandler {
 	}
     //Seperates the query string
     private void parseTargetLine(){
-        String matchregex = "([\\/\\\\a-zA-Z0-9\\.-]+)(\\?.+)?";
+        String matchregex = "([\\/\\\\a-zA-Z0-9\\.-_]+)(\\?.+)?";
         Pattern pattern = Pattern.compile(matchregex);
         Matcher matcher = pattern.matcher(line_buffer.toString());
         try{

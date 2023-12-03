@@ -310,7 +310,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		// Directory Check and change to index.html
 		else if (resource.isDirectory()) {
 			Debug.DEBUG("Looking for Index.html");
-			resource = new File(Root + target + "index.html");
+			resource = new File(Root + target + "/index.html");
 		}
 
 		// Check if URL exists.
@@ -342,7 +342,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 				return;
 			}
 		}
-		
+
 		// File Specific Headers
 		LocalDateTime lastModified = LocalDateTime.ofInstant(Instant.ofEpochMilli(resource.lastModified()), ZoneId.of("Etc/UTC"));
 		ZonedDateTime lastModifiedZoned = ZonedDateTime.ofInstant(Instant.ofEpochMilli(resource.lastModified()), ZoneId.of("Etc/UTC")); 
