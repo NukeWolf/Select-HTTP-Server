@@ -16,9 +16,10 @@ public class HTTP1ReadHandler {
 	public HashMap<String, String> headers;
 	public String body;
 	private int bodyByteCount;
+	private int chunkedCount;
 
 	private enum ReadStates {
-		REQUEST_METHOD, REQUEST_TARGET, REQUEST_PROTOCOL, REQUEST_HEADERS, REQUEST_BODY, REQUEST_COMPLETE,
+		REQUEST_METHOD, REQUEST_TARGET, REQUEST_PROTOCOL, REQUEST_HEADERS, REQUEST_BODY, REQUEST_CHUNK_COUNT,REQUEST_CHUNK_BODY, REQUEST_CHUNK_LINE, REQUEST_COMPLETE,
 		REQUEST_PARSE_ERROR
 	}
 
@@ -29,12 +30,15 @@ public class HTTP1ReadHandler {
 		line_buffer = new StringBuffer(4096);
 		headers = new HashMap<String, String>();
 		currentReadState = ReadStates.REQUEST_METHOD;
+		body = "";
     }
     public void resetHandler(){
         bodyByteCount = 0;
 		line_buffer.setLength(0);
 		headers = new HashMap<String,String>();
 		currentReadState = ReadStates.REQUEST_METHOD;
+		body = "";
+
 	}
 
 	public void readBuffer(ByteBuffer inBuffer) {
@@ -86,12 +90,16 @@ public class HTTP1ReadHandler {
 						Debug.DEBUG("Header : " + line_buffer.toString());
 						// If two new lines in a row, move on to messge body.
 						if (!parseHeaderLine()) {
+
+							if (headers.get("Transfer-Encoding") != null && headers.get("Transfer-Encoding").equals("chunked")){
+								currentReadState = ReadStates.REQUEST_CHUNK_COUNT;
+							}
 							// If there is no Content Length message, assume request is complete.
-							Debug.DEBUG("Clength: " + headers.get("Content-Length"));
-							if (headers.get("Content-Length") == null) {
+							else if (headers.get("Content-Length") == null) {
 								currentReadState = ReadStates.REQUEST_COMPLETE;
 								body = null;
 							} else {
+								Debug.DEBUG("Clength: " + headers.get("Content-Length"));
 								if (headers.get("Content-Length").matches("[0-9]+")) {
 									currentReadState = ReadStates.REQUEST_BODY;
 									Debug.DEBUG("Reading Body");
@@ -118,7 +126,53 @@ public class HTTP1ReadHandler {
 						bodyByteCount += 1;
 					}
 					break;
-					
+				case REQUEST_CHUNK_COUNT:
+					bodyByteCount = 0;
+					Debug.DEBUG("Chunk Count:" + line_buffer.toString());
+
+					if (ch == '\n') {
+						String count = line_buffer.toString();
+						if (count.matches("[0-9a-f]+")){
+							chunkedCount = Integer.parseInt(count,16);
+							Debug.DEBUG("Chunk Count:" + chunkedCount);
+
+							currentReadState = ReadStates.REQUEST_CHUNK_BODY;
+						}
+						else{
+							handleException();
+						}
+						line_buffer.setLength(0);
+					} else if (ch == '\r') {
+					} else
+						line_buffer.append(ch);
+					break;
+				case REQUEST_CHUNK_BODY:
+					if (chunkedCount == 0){
+						currentReadState = ReadStates.REQUEST_CHUNK_LINE;
+					}
+					else if (bodyByteCount >= chunkedCount - 1) {
+						line_buffer.append(ch);
+						currentReadState = ReadStates.REQUEST_CHUNK_LINE;
+					} else {
+						line_buffer.append(ch);
+						bodyByteCount += 1;
+					}
+					break;
+				case REQUEST_CHUNK_LINE:
+					if (ch == '\n') {
+						if (chunkedCount == 0){
+							currentReadState = ReadStates.REQUEST_COMPLETE;
+						}
+						else{
+							Debug.DEBUG("Chunk Body:" + line_buffer.toString());
+							body = body.concat(line_buffer.toString());
+							line_buffer.setLength(0);
+							currentReadState = ReadStates.REQUEST_CHUNK_COUNT;
+						}
+					} else if (ch == '\r') {
+					} else
+						handleException();
+					break;
 				case REQUEST_COMPLETE:
 					break;
 			} // end of switch
@@ -157,7 +211,7 @@ public class HTTP1ReadHandler {
 	}
     //Seperates the query string
     private void parseTargetLine(){
-        String matchregex = "([\\/\\\\a-zA-Z0-9\\.-_]+)(\\?.+)?";
+        String matchregex = "([\\/\\\\a-zA-Z0-9\\.\\-_]+)(\\?.+)?";
         Pattern pattern = Pattern.compile(matchregex);
         Matcher matcher = pattern.matcher(line_buffer.toString());
         try{

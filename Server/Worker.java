@@ -18,10 +18,12 @@ public class Worker implements Runnable {
 	private Selector selector;
 
 	private boolean shutdown;
+	private ServerConfig config;
 
 	public Worker(ConcurrentLinkedQueue<SocketChannel> cSQ, ConcurrentHashMap<SocketChannel, Instant> uCT) {
 		clientSocketQueue = cSQ;
 		unusedChannelTable = uCT;
+		config = ServerConfig.getInstance();
 		try {
 			selector = Selector.open();
 		} catch (IOException ex) {
@@ -43,7 +45,7 @@ public class Worker implements Runnable {
 				// check for new channels to add to this worker
 				SocketChannel cch = clientSocketQueue.poll();
 				if (cch != null) {
-					HTTP1ReadWriteHandler handler= new HTTP1ReadWriteHandler();
+					HTTP1ReadWriteHandler handler= new HTTP1ReadWriteHandler(config);
 					SelectionKey key = cch.register(selector, handler.getInitOps());
 					key.attach(handler);
 				}

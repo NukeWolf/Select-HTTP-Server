@@ -23,6 +23,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 	private ByteBuffer inBuffer;
 	private ByteBuffer outBuffer;
 	private ByteBuffer fileBuffer;
+	
 	// CGI Handling
 	Process cgi;
 
@@ -33,11 +34,13 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 	private boolean channelClosed;
 
 	private final int REQUEST_TIMEOUT = 3;
+	private ServerConfig config;
+
 	// private State state;
 
-	public HTTP1ReadWriteHandler() {
-		inBuffer = ByteBuffer.allocate(4096);
-		outBuffer = ByteBuffer.allocate(4096);
+	public HTTP1ReadWriteHandler(ServerConfig c) {
+		inBuffer = ByteBuffer.allocate(8192);
+		outBuffer = ByteBuffer.allocate(8192);
 		fileBuffer = null;
 
 		readHandler = new HTTP1ReadHandler();
@@ -45,6 +48,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 
 		// initial state
 		channelClosed = false;
+		config = c;
 
 	}
 
@@ -279,7 +283,6 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		// Root Selection
 		String host = headers.get("Host");
 		String Root;
-		ServerConfig config = ServerConfig.getInstance();
 
 		if (host != null && config.getVHostRoots().get(host) != null){
 			Root = config.getVHostRoots().get(host);
@@ -380,7 +383,13 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 			env.put("SERVER_PROTOCOL", readHandler.protocol);
 			env.put("SERVER_SOFTWARE", "Yague/1.0");
 			if (readHandler.body != null) {
-				env.put("CONTENT_LENGTH", readHandler.headers.get("Content-Length"));
+				String length = readHandler.headers.get("Content-Length");
+				if (length == null){
+					env.put("CONTENT_LENGTH", Integer.toString(readHandler.body.length()));
+				}
+				else{
+					env.put("CONTENT_LENGTH", readHandler.headers.get("Content-Length"));
+				}
 				env.put("CONTENT_TYPE", readHandler.headers.get("Content-Type"));
 			}
 			if (auth != null) {
