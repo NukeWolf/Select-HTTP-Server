@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.util.*; // for Set and Iterator and ArrayList
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import Server.HTTP1ReadHandler;
 import Server.HTTP1ReadWriteHandler;
@@ -15,14 +16,17 @@ public class Worker implements Runnable {
 	private ConcurrentLinkedQueue<SocketChannel> clientSocketQueue;
 	private ConcurrentHashMap<SocketChannel, Instant> unusedChannelTable;
 
+	private AtomicInteger numConnections;
+
 	private Selector selector;
 
 	private boolean shutdown;
 	private ServerConfig config;
 
-	public Worker(ConcurrentLinkedQueue<SocketChannel> cSQ, ConcurrentHashMap<SocketChannel, Instant> uCT) {
+	public Worker(ConcurrentLinkedQueue<SocketChannel> cSQ, ConcurrentHashMap<SocketChannel, Instant> uCT, AtomicInteger nC) {
 		clientSocketQueue = cSQ;
 		unusedChannelTable = uCT;
+		numConnections = nC;
 		config = ServerConfig.getInstance();
 		try {
 			selector = Selector.open();
@@ -45,9 +49,11 @@ public class Worker implements Runnable {
 				// check for new channels to add to this worker
 				SocketChannel cch = clientSocketQueue.poll();
 				if (cch != null) {
-					HTTP1ReadWriteHandler handler= new HTTP1ReadWriteHandler(config);
+					HTTP1ReadWriteHandler handler= new HTTP1ReadWriteHandler(config, numConnections);
 					SelectionKey key = cch.register(selector, handler.getInitOps());
 					key.attach(handler);
+					numConnections.incrementAndGet();
+					Debug.DEBUG("attached new!");
 				}
 				selector.select(); 
 			} catch (IOException ex) {

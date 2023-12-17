@@ -4,8 +4,7 @@ import java.nio.*;
 import java.nio.channels.*;
 import java.util.HashMap;
 import java.util.Map;
-
-
+import java.util.concurrent.atomic.AtomicInteger;
 import java.io.*;
 import java.net.URLConnection;
 import java.time.Instant;
@@ -23,6 +22,9 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 	private ByteBuffer inBuffer;
 	private ByteBuffer outBuffer;
 	private ByteBuffer fileBuffer;
+
+	// connections
+	private AtomicInteger numConnections;
 	
 	// CGI Handling
 	Process cgi;
@@ -33,12 +35,11 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 
 	private boolean channelClosed;
 
-	private final int REQUEST_TIMEOUT = 3;
 	private ServerConfig config;
 
 	// private State state;
 
-	public HTTP1ReadWriteHandler(ServerConfig c) {
+	public HTTP1ReadWriteHandler(ServerConfig c, AtomicInteger nC) {
 		inBuffer = ByteBuffer.allocate(8192);
 		outBuffer = ByteBuffer.allocate(8192);
 		fileBuffer = null;
@@ -49,7 +50,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		// initial state
 		channelClosed = false;
 		config = c;
-
+		numConnections = nC;
 	}
 
 	public void handleException() {
@@ -60,6 +61,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 			key.channel().close();
 			key.cancel();
 			channelClosed = true;
+			numConnections.decrementAndGet();
 			return;
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -202,7 +204,7 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		updateConnectionState(key);
 
 		// try {Thread.sleep(5000);} catch (InterruptedException e) {}
-		Debug.DEBUG("handleWrite->");
+		Debug.DEBUG("handleWrite->\n\n");
 	} // end of handleWrite
 
 	private void processInBuffer(SelectionKey key) throws IOException {
@@ -314,6 +316,18 @@ public class HTTP1ReadWriteHandler implements IReadWriteHandler {
 		else if (resource.isDirectory()) {
 			Debug.DEBUG("Looking for Index.html");
 			resource = new File(Root + target + "/index.html");
+		}
+
+		if (resource.getName().equals("load")) {
+			if (numConnections.get() > 1) {
+				writeHandler.setStatusLine("503", "OVERLOADED");
+			}
+			else {
+				writeHandler.setStatusLine("200", "OK");
+			}
+			Debug.DEBUG("numConnections: " + numConnections.get());
+			Debug.DEBUG("Sent Load!");
+			return;
 		}
 
 		// Check if URL exists.

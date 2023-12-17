@@ -5,6 +5,7 @@ import java.nio.channels.*;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class Dispatcher implements Runnable {
 
@@ -14,9 +15,11 @@ public class Dispatcher implements Runnable {
 
 	public volatile boolean shutdown;
 	private ConcurrentLinkedQueue<SocketChannel> clientSocketQueue;
-	private ConcurrentHashMap<SocketChannel, Instant> unusedChannelTable;
 	private ConcurrentLinkedQueue<Runnable> commandQueue;
 
+	public AtomicInteger numConnections;
+
+	private ConcurrentHashMap<SocketChannel, Instant> unusedChannelTable;
 	public UnusedChannelMonitor unusedChannelMonitor;
 	public Thread unusedChannelMonitorThread;
 
@@ -37,6 +40,7 @@ public class Dispatcher implements Runnable {
 		// initialize command structures
 		shutdown = false;
 		clientSocketQueue = new ConcurrentLinkedQueue<SocketChannel>();
+		numConnections = new AtomicInteger(0);
 		unusedChannelTable = new ConcurrentHashMap<SocketChannel, Instant>();
 		commandQueue = new ConcurrentLinkedQueue<Runnable>();
 
@@ -48,7 +52,7 @@ public class Dispatcher implements Runnable {
 		workers = new Worker[nSelectLoops];
 		workerThreads = (ThreadPoolExecutor) Executors.newFixedThreadPool(nSelectLoops);
 		for (int i = 0; i < nSelectLoops; i++) {
-			workers[i] = new Worker(clientSocketQueue, unusedChannelTable);
+			workers[i] = new Worker(clientSocketQueue, unusedChannelTable, numConnections);
 			Debug.DEBUG("selector: " + workers[i].getSelector());
 
 			workerThreads.execute(workers[i]);
@@ -97,12 +101,14 @@ public class Dispatcher implements Runnable {
 				try {
 					if (key.isAcceptable()) {
 						handleAccept(key);
+						Debug.DEBUG("new tcp connection");
 					}
 				} catch (IOException e) {
 					System.out.println("Exception when handling key " + key);
 					key.cancel();
 					try {
 						key.channel().close();
+						numConnections.decrementAndGet();
 					}
 					catch (IOException ex) {
 						System.out.println("Failed to close problematic accept channel: " + key.channel());
